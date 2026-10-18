@@ -22,6 +22,21 @@ export default function Numbers() {
       setError(err instanceof Error ? err.message : '未能新增號碼')
     }
   }
+  const [syncing, setSyncing] = useState<number | null>(null)
+  const [syncResult, setSyncResult] = useState('')
+  const syncContacts = async (id: number) => {
+    setSyncing(id); setSyncResult('')
+    try {
+      const r = await api<{ resolved: number; unresolved: number }>(`/numbers/${id}/sync-contacts`, { method: 'POST' })
+      setSyncResult(r.unresolved
+        ? `已同步通訊錄名稱，補回 ${r.resolved} 個電話號碼。仍有 ${r.unresolved} 位客戶的號碼被 WhatsApp 隱藏，佢哋下次傳訊息時會自動補上。`
+        : `已同步通訊錄名稱，補回 ${r.resolved} 個電話號碼。`)
+    } catch (err) {
+      setSyncResult(err instanceof Error ? err.message : '同步失敗')
+    } finally {
+      setSyncing(null)
+    }
+  }
   const reconnect = async (id: number) => { await api(`/numbers/${id}/reconnect`, { method: 'POST' }); setLinkingId(id) }
   const unlink = async (id: number) => {
     if (!confirm('解除連結後不會再收到新訊息，但已備份的對話與聯絡人會保留。確定？')) return
@@ -42,6 +57,7 @@ export default function Numbers() {
         <span><Icon name="archive" size={16} />由連接一刻起自動備份</span>
       </div>
 
+      {syncResult && <div className="demo-hint" style={{ marginBottom: 16 }}>{syncResult}</div>}
       <div className="number-cards">
         {numbers.map((n) => (
           <div key={n.id} className="card number-card">
@@ -59,6 +75,7 @@ export default function Numbers() {
             {isAdmin && !n.demo && (
               <div style={{ display: 'flex', gap: 8 }}>
                 {n.status !== 'connected' && <button className="btn sm primary" onClick={() => reconnect(n.id)}><Icon name="qr" size={14} />{n.status === 'qr' ? '顯示 QR Code' : '重新連接'}</button>}
+                {n.status === 'connected' && <button className="btn sm" disabled={syncing === n.id} onClick={() => syncContacts(n.id)}><Icon name="contacts" size={14} />{syncing === n.id ? '同步中…' : '同步聯絡人'}</button>}
                 {n.status !== 'unlinked' && <button className="btn sm danger" onClick={() => unlink(n.id)}>解除連結</button>}
               </div>
             )}

@@ -1,4 +1,4 @@
-import { all, get, run, tx } from './db.js'
+import { CONTACT_NAME_SQL, CONTACT_PHONE_SQL, all, get, run, tx } from './db.js'
 import { broadcast } from './realtime.js'
 
 export type MessageType =
@@ -7,8 +7,8 @@ export type MessageType =
 export interface IncomingMessage {
   numberId: number
   jid: string
-  /** Customer phone number (digits only) or, if WhatsApp hides it, the opaque JID. */
-  phone: string
+  /** Who the customer is: phone number and/or LID, digits only. At least one is required. */
+  contact: ContactIds
   waName?: string
   waId: string
   fromMe: boolean
@@ -34,23 +34,117 @@ export function previewOf(type: MessageType, body: string) {
   return label ? `${label} ${body}` : body
 }
 
-export function upsertContact(phone: string, waName?: string): number {
-  const existing = get<{ id: number; wa_name: string | null }>(
-    'SELECT id, wa_name FROM contacts WHERE phone = ?', phone,
-  )
-  if (existing) {
-    if (waName && waName !== existing.wa_name) {
-      run('UPDATE contacts SET wa_name = ?, updated_at = unixepoch() WHERE id = ?', waName, existing.id)
+export interface ContactIds {
+  /** Real phone number, digits only. */
+  pn?: string
+  /** WhatsApp LID, digits only. */
+  lid?: string
+}
+
+/** "85291234567@s.whatsapp.net" or "1234:5@lid" -> digits only. */
+export function jidDigits(jid: string | null | undefined): string | undefined {
+  return jid ? jid.split('@')[0].split(':')[0] || undefined : undefined
+}
+
+export function pnForLid(lid: string): string | undefined {
+  return get<{ pn: string }>('SELECT pn FROM lid_map WHERE lid = ?', lid)?.pn
+}
+
+/**
+ * Record that a LID belongs to a phone number. If Baton already has the customer
+ * under their LID, the real number is filled in and any duplicate is merged.
+ * Returns true if an existing contact changed.
+ */
+export function rememberLid(lid: string, pn: string): boolean {
+  if (!lid || !pn || lid === pn) return false
+  const known = pnForLid(lid)
+  if (known !== pn) run('INSERT OR REPLACE INTO lid_map (lid, pn) VALUES (?, ?)', lid, pn)
+  const unresolved = get<{ id: number }>('SELECT id FROM contacts WHERE lid = ? AND phone = ?', lid, lid)
+  if (!unresolved) return false
+  resolveContact({ pn, lid })
+  return true
+}
+
+/**
+ * Find or create the one company contact for a customer, given whatever WhatsApp
+ * told us (phone number, LID, or both), and keep their names up to date.
+ */
+export function resolveContact(ids: ContactIds, names: { saved?: string; wa?: string } = {}): number {
+  return tx(() => {
+    const lid = ids.lid
+    const pn = ids.pn ?? (lid ? pnForLid(lid) : undefined)
+    if (!pn && !lid) throw new Error('Contact needs a phone number or LID')
+    const byPn = pn ? get<{ id: number }>('SELECT id FROM contacts WHERE phone = ?', pn) : undefined
+    const byLid = lid ? get<{ id: number }>('SELECT id FROM contacts WHERE lid = ? OR phone = ?', lid, lid) : undefined
+
+    let id: number
+    if (byPn && byLid && byPn.id !== byLid.id) {
+      mergeContacts(byLid.id, byPn.id)
+      id = byPn.id
+    } else if (byPn ?? byLid) {
+      id = (byPn ?? byLid)!.id
+    } else {
+      id = Number(run('INSERT INTO contacts (phone, lid) VALUES (?, ?)', pn ?? lid, lid ?? null).lastInsertRowid)
     }
-    return existing.id
+    if (pn) run('UPDATE contacts SET phone = ? WHERE id = ? AND phone != ?', pn, id, pn)
+    if (lid) run('UPDATE contacts SET lid = ? WHERE id = ? AND lid IS NULL', lid, id)
+    const saved = names.saved ?? get<{ name: string }>('SELECT name FROM phonebook WHERE key IN (?, ?)', pn ?? '', lid ?? '')?.name
+    if (saved) run('UPDATE contacts SET saved_name = ?, updated_at = unixepoch() WHERE id = ? AND saved_name IS NOT ?', saved, id, saved)
+    if (names.wa) run('UPDATE contacts SET wa_name = ?, updated_at = unixepoch() WHERE id = ? AND wa_name IS NOT ?', names.wa, id, names.wa)
+    return id
+  })
+}
+
+/** Fold a duplicate contact into the one we keep. Nothing the team wrote is lost. */
+function mergeContacts(fromId: number, intoId: number) {
+  const from = get<{ name: string | null; saved_name: string | null; wa_name: string | null; notes: string; owner_id: number | null; lid: string | null }>(
+    'SELECT name, saved_name, wa_name, notes, owner_id, lid FROM contacts WHERE id = ?', fromId,
+  )!
+  run('UPDATE contacts SET lid = NULL WHERE id = ?', fromId)
+  run(
+    `UPDATE contacts SET name = COALESCE(name, ?), saved_name = COALESCE(saved_name, ?), wa_name = COALESCE(wa_name, ?),
+       owner_id = COALESCE(owner_id, ?), lid = COALESCE(lid, ?),
+       notes = CASE WHEN notes = '' THEN ? WHEN ? = '' THEN notes ELSE notes || char(10) || ? END
+     WHERE id = ?`,
+    from.name, from.saved_name, from.wa_name, from.owner_id, from.lid, from.notes, from.notes, from.notes, intoId,
+  )
+  run('UPDATE deals SET contact_id = ? WHERE contact_id = ?', intoId, fromId)
+  for (const c of all<{ id: number; number_id: number }>('SELECT id, number_id FROM conversations WHERE contact_id = ?', fromId)) {
+    const twin = get<{ id: number }>('SELECT id FROM conversations WHERE contact_id = ? AND number_id = ?', intoId, c.number_id)
+    if (twin) mergeConversations(c.id, twin.id)
+    else run('UPDATE conversations SET contact_id = ? WHERE id = ?', intoId, c.id)
   }
-  return Number(run('INSERT INTO contacts (phone, wa_name) VALUES (?, ?)', phone, waName ?? null).lastInsertRowid)
+  run('DELETE FROM contacts WHERE id = ?', fromId)
+}
+
+/** The same chat seen under a LID and under a phone number becomes one conversation. */
+function mergeConversations(fromId: number, intoId: number) {
+  const from = get<{ unread: number; assignee_id: number | null; status: string }>(
+    'SELECT unread, assignee_id, status FROM conversations WHERE id = ?', fromId,
+  )!
+  run('UPDATE OR IGNORE messages SET conversation_id = ? WHERE conversation_id = ?', intoId, fromId)
+  run('DELETE FROM messages WHERE conversation_id = ?', fromId)
+  run('UPDATE events SET conversation_id = ? WHERE conversation_id = ?', intoId, fromId)
+  run('UPDATE deals SET conversation_id = ? WHERE conversation_id = ?', intoId, fromId)
+  const latest = get<{ ts: number; type: MessageType; body: string }>(
+    'SELECT ts, type, body FROM messages WHERE conversation_id = ? ORDER BY ts DESC LIMIT 1', intoId,
+  )
+  run(
+    `UPDATE conversations SET unread = unread + ?, assignee_id = COALESCE(assignee_id, ?),
+       status = CASE WHEN ? = 'open' THEN 'open' ELSE status END,
+       last_message_at = COALESCE(?, last_message_at), last_preview = COALESCE(?, last_preview)
+     WHERE id = ?`,
+    from.unread, from.assignee_id, from.status, latest?.ts ?? null,
+    latest ? previewOf(latest.type, latest.body) : null, intoId,
+  )
+  run('DELETE FROM conversations WHERE id = ?', fromId)
 }
 
 function upsertConversation(numberId: number, jid: string, contactId: number): number {
-  const existing = get<{ id: number }>(
-    'SELECT id FROM conversations WHERE number_id = ? AND jid = ?', numberId, jid,
-  )
+  // Look up by chat first, then by customer: WhatsApp may address one chat by LID and by phone number.
+  const existing =
+    get<{ id: number }>('SELECT id FROM conversations WHERE number_id = ? AND jid = ?', numberId, jid) ??
+    get<{ id: number }>('SELECT id FROM conversations WHERE number_id = ? AND contact_id = ?', numberId, contactId)
   if (existing) return existing.id
   return Number(
     run('INSERT INTO conversations (number_id, contact_id, jid) VALUES (?, ?, ?)', numberId, contactId, jid)
@@ -64,7 +158,7 @@ function upsertConversation(numberId: number, jid: string, contactId: number): n
  */
 export function storeMessage(m: IncomingMessage): { conversationId: number; messageId: number } | null {
   const result = tx(() => {
-    const contactId = upsertContact(m.phone, m.fromMe ? undefined : m.waName)
+    const contactId = resolveContact(m.contact, { wa: m.fromMe ? undefined : m.waName })
     const conversationId = upsertConversation(m.numberId, m.jid, contactId)
     const inserted = run(
       `INSERT OR IGNORE INTO messages
@@ -94,18 +188,18 @@ export function storeMessage(m: IncomingMessage): { conversationId: number; mess
 }
 
 /** Attach media that finished downloading after the message row was written. */
-export function setMessageMedia(numberId: number, jid: string, waId: string, mediaPath: string, mime: string) {
+export function setMessageMedia(numberId: number, waId: string, mediaPath: string, mime: string) {
   run(
     `UPDATE messages SET media_path = ?, media_mime = ?
-     WHERE wa_id = ? AND conversation_id = (SELECT id FROM conversations WHERE number_id = ? AND jid = ?)`,
-    mediaPath, mime, waId, numberId, jid,
+     WHERE wa_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE number_id = ?)`,
+    mediaPath, mime, waId, numberId,
   )
 }
 
 const CONVERSATION_SELECT = `
   SELECT c.id, c.number_id, c.contact_id, c.jid, c.assignee_id, c.status, c.unread,
          c.last_message_at, c.last_preview,
-         ct.phone, COALESCE(ct.name, ct.wa_name, ct.phone) AS contact_name,
+         ${CONTACT_PHONE_SQL} AS phone, ${CONTACT_NAME_SQL} AS contact_name,
          n.label AS number_label, n.phone AS number_phone
   FROM conversations c
   JOIN contacts ct ON ct.id = c.contact_id
@@ -127,8 +221,8 @@ export function listConversations(filter: {
   else where.push("c.status = 'open'")
   if (filter.numberId) { where.push('c.number_id = ?'); params.push(filter.numberId) }
   if (filter.q) {
-    where.push('(ct.name LIKE ? OR ct.wa_name LIKE ? OR ct.phone LIKE ?)')
-    params.push(`%${filter.q}%`, `%${filter.q}%`, `%${filter.q}%`)
+    where.push('(ct.name LIKE ? OR ct.saved_name LIKE ? OR ct.wa_name LIKE ? OR ct.phone LIKE ?)')
+    params.push(...Array(4).fill(`%${filter.q}%`))
   }
   return all(
     `${CONVERSATION_SELECT} WHERE ${where.join(' AND ')} ORDER BY c.last_message_at DESC LIMIT 300`,

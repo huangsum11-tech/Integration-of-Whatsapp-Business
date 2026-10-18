@@ -6,10 +6,10 @@ import { teamAnalytics } from './analytics.js'
 import {
   SESSION_COOKIE, createSession, hashPassword, requireAdmin, requireUser, verifyPassword,
 } from './auth.js'
-import { all, get, run, tx } from './db.js'
+import { CONTACT_NAME_SQL, CONTACT_PHONE_SQL, all, get, run, tx } from './db.js'
 import { addEvent, getConversation, getTimeline, listConversations, storeMessage } from './inbox.js'
 import { broadcast } from './realtime.js'
-import { MEDIA_DIR, connectNumber, currentQr, disconnectNumber, isConnected, sendText } from './whatsapp.js'
+import { MEDIA_DIR, connectNumber, currentQr, disconnectNumber, isConnected, sendText, syncContacts } from './whatsapp.js'
 
 export const api = express.Router()
 
@@ -153,6 +153,13 @@ api.post('/numbers/:id/unlink', requireAdmin, async (req, res) => {
   res.json({ ok: true })
 })
 
+/** Fill in hidden phone numbers and re-download saved names from the phone's contact list. */
+api.post('/numbers/:id/sync-contacts', requireAdmin, async (req, res) => {
+  const id = Number(req.params.id)
+  if (!isConnected(id)) return res.status(409).json({ error: '此號碼未連接' })
+  res.json(await syncContacts(id, undefined, true))
+})
+
 // ---------- Inbox ----------
 
 api.get('/conversations', (req, res) => {
@@ -181,7 +188,7 @@ api.get('/conversations/:id', (req, res) => {
   const id = Number(req.params.id)
   const conversation = getConversation(id)
   if (!conversation) return res.status(404).json({ error: '找不到對話' })
-  const contact = get('SELECT * FROM contacts WHERE id = ?', conversation.contact_id)
+  const contact = getContact(conversation.contact_id)
   const deals = all('SELECT d.*, u.name AS user_name FROM deals d LEFT JOIN users u ON u.id = d.user_id WHERE d.contact_id = ? ORDER BY d.created_at DESC', conversation.contact_id)
   const otherConversations = all(
     `SELECT c.id, c.last_message_at, c.last_preview, n.label AS number_label
@@ -243,7 +250,7 @@ api.post('/conversations/:id/messages', async (req, res) => {
   }
   if (number?.demo) {
     storeMessage({
-      numberId: conversation.number_id, jid: conversation.jid, phone: conversation.phone,
+      numberId: conversation.number_id, jid: conversation.jid, contact: { pn: conversation.phone },
       waId: `demo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, fromMe: true,
       senderId: req.user.id, aiAssisted: b.aiAssisted, type: 'text', body: b.text,
       ts: Math.floor(Date.now() / 1000), live: true,
@@ -266,16 +273,24 @@ api.post('/conversations/:id/draft', async (req, res) => {
 
 // ---------- Company contact book ----------
 
+/** Contact columns with phone hidden (NULL) while WhatsApp only gave us a LID. */
+const CONTACT_COLUMNS = `ct.id, ${CONTACT_PHONE_SQL} AS phone, ct.lid, ct.name, ct.saved_name, ct.wa_name, ct.notes,
+  ct.owner_id, ct.created_at, ct.updated_at`
+
+function getContact(id: number) {
+  return get(`SELECT ${CONTACT_COLUMNS} FROM contacts ct WHERE ct.id = ?`, id)
+}
+
 api.get('/contacts', (req, res) => {
   const q = req.query.q ? `%${String(req.query.q)}%` : '%'
   res.json(all(
-    `SELECT ct.*, COALESCE(ct.name, ct.wa_name, ct.phone) AS display_name, u.name AS owner_name,
+    `SELECT ${CONTACT_COLUMNS}, ${CONTACT_NAME_SQL} AS display_name, u.name AS owner_name,
        (SELECT COUNT(*) FROM conversations c WHERE c.contact_id = ct.id) AS conversations,
        (SELECT GROUP_CONCAT(DISTINCT n.label) FROM conversations c JOIN numbers n ON n.id = c.number_id WHERE c.contact_id = ct.id) AS numbers,
        (SELECT MAX(c.last_message_at) FROM conversations c WHERE c.contact_id = ct.id) AS last_message_at,
        (SELECT COALESCE(SUM(amount), 0) FROM deals d WHERE d.contact_id = ct.id AND d.stage = 'won') AS won_amount
      FROM contacts ct LEFT JOIN users u ON u.id = ct.owner_id
-     WHERE ct.name LIKE ?1 OR ct.wa_name LIKE ?1 OR ct.phone LIKE ?1 OR (?1 = '%')
+     WHERE ct.name LIKE ?1 OR ct.saved_name LIKE ?1 OR ct.wa_name LIKE ?1 OR ct.phone LIKE ?1 OR (?1 = '%')
      ORDER BY last_message_at DESC NULLS LAST LIMIT 500`,
     q,
   ))
@@ -293,8 +308,8 @@ api.patch('/contacts/:id', (req, res) => {
   if (b.owner_id !== undefined) run('UPDATE contacts SET owner_id = ? WHERE id = ?', b.owner_id, id)
   run('UPDATE contacts SET updated_at = unixepoch() WHERE id = ?', id)
   // A renamed contact is renamed in every number's inbox at once.
-  broadcast('contact', get('SELECT * FROM contacts WHERE id = ?', id))
-  res.json(get('SELECT * FROM contacts WHERE id = ?', id))
+  broadcast('contact', getContact(id))
+  res.json(getContact(id))
 })
 
 // ---------- Deals ----------
@@ -324,7 +339,7 @@ api.get('/search', (req, res) => {
   const q = String(req.query.q ?? '').trim()
   if (!q) return res.json([])
   const select = `SELECT m.id, m.conversation_id, m.body, m.ts, m.from_me, m.type,
-      COALESCE(ct.name, ct.wa_name, ct.phone) AS contact_name, n.label AS number_label
+      ${CONTACT_NAME_SQL} AS contact_name, n.label AS number_label
     FROM messages m JOIN conversations c ON c.id = m.conversation_id
     JOIN contacts ct ON ct.id = c.contact_id JOIN numbers n ON n.id = c.number_id`
   // The trigram index needs 3+ characters; shorter queries (e.g. two Chinese characters) use LIKE.

@@ -24,7 +24,8 @@ export interface User {
 export interface Conversation {
   id: number; number_id: number; contact_id: number; jid: string; assignee_id: number | null
   status: 'open' | 'closed'; unread: number; last_message_at: number; last_preview: string
-  phone: string; contact_name: string; number_label: string; number_phone: string | null
+  /** Null while WhatsApp hides the customer's number behind a LID. */
+  phone: string | null; contact_name: string; number_label: string; number_phone: string | null
 }
 
 export interface Message {
@@ -39,7 +40,8 @@ export interface InboxEvent {
 }
 
 export interface Contact {
-  id: number; phone: string; name: string | null; wa_name: string | null; notes: string
+  id: number; phone: string | null; lid: string | null; name: string | null; saved_name: string | null
+  wa_name: string | null; notes: string
   owner_id: number | null; display_name?: string; owner_name?: string | null
   conversations?: number; numbers?: string | null; last_message_at?: number | null; won_amount?: number
 }

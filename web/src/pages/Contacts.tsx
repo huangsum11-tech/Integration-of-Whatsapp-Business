@@ -22,7 +22,8 @@ export default function Contacts() {
   useEffect(() => {
     const socket = getSocket()
     socket.on('contact', load)
-    return () => { socket.off('contact', load) }
+    socket.on('refresh', load)
+    return () => { socket.off('contact', load); socket.off('refresh', load) }
   }, [q])
 
   const openContact = async (c: Contact) => {
@@ -77,7 +78,7 @@ export default function Contacts() {
                 <tr key={c.id} className="clickable" onClick={() => editing !== c.id && openContact(c)}>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <Avatar name={c.display_name ?? c.phone} size={32} />
+                      <Avatar name={c.display_name ?? '?'} size={32} />
                       {editing === c.id ? (
                         <input className="input" autoFocus value={draftName} onClick={(e) => e.stopPropagation()}
                           onChange={(e) => setDraftName(e.target.value)} onBlur={() => saveName(c)}
@@ -87,14 +88,14 @@ export default function Contacts() {
                           <div style={{ fontWeight: 500 }}>
                             {c.display_name}
                             <button className="btn ghost sm" style={{ padding: '0 6px', marginLeft: 4, fontSize: 12 }}
-                              onClick={(e) => { e.stopPropagation(); setEditing(c.id); setDraftName(c.name ?? c.wa_name ?? '') }}>改名</button>
+                              onClick={(e) => { e.stopPropagation(); setEditing(c.id); setDraftName(c.name ?? c.saved_name ?? c.wa_name ?? '') }}>改名</button>
                           </div>
                           {c.notes && <div className="faint" style={{ fontSize: 12, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.notes}</div>}
                         </div>
                       )}
                     </div>
                   </td>
-                  <td className="num muted">{formatPhone(c.phone)}</td>
+                  <td className="num muted">{formatPhone(c.phone) || <span className="faint">號碼未同步</span>}</td>
                   <td>{c.numbers?.split(',').map((n) => <span key={n} className="number-tag" style={{ marginRight: 4 }}>{n}</span>)}</td>
                   <td>{owner ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Avatar name={owner.name} color={owner.color} size={20} />{owner.name}{!owner.active && <span className="chip">已離職</span>}</span> : <span className="faint">—</span>}</td>
                   <td className="num">{c.won_amount ? money(c.won_amount) : <span className="faint">—</span>}</td>

@@ -129,6 +129,35 @@ export function run(sql: string, ...params: any[]) {
   return db.prepare(sql).run(...params)
 }
 
+// ---------- Migrations for databases created by earlier versions ----------
+
+function columns(table: string) {
+  return all<{ name: string }>(`PRAGMA table_info(${table})`).map((c) => c.name)
+}
+
+// WhatsApp hides many customers' phone numbers behind a LID (an opaque "linked ID").
+// A contact keeps its LID here; until the real number is known, phone holds the LID digits.
+if (!columns('contacts').includes('lid')) {
+  db.exec('ALTER TABLE contacts ADD COLUMN lid TEXT')
+  db.exec("UPDATE contacts SET lid = phone WHERE id IN (SELECT contact_id FROM conversations WHERE jid LIKE '%@lid')")
+}
+// The name saved in the WhatsApp Business phone's own contact list.
+if (!columns('contacts').includes('saved_name')) db.exec('ALTER TABLE contacts ADD COLUMN saved_name TEXT')
+if (!columns('numbers').includes('contacts_synced_at')) db.exec('ALTER TABLE numbers ADD COLUMN contacts_synced_at INTEGER')
+db.exec(`
+CREATE UNIQUE INDEX IF NOT EXISTS contacts_lid ON contacts (lid);
+CREATE TABLE IF NOT EXISTS lid_map (lid TEXT PRIMARY KEY, pn TEXT NOT NULL);
+-- Names from the linked phones' contact lists, keyed by phone number or LID digits.
+-- Kept separately so a name that syncs before the customer's first chat is not lost.
+CREATE TABLE IF NOT EXISTS phonebook (key TEXT PRIMARY KEY, name TEXT NOT NULL);
+`)
+
+/** Display name: Baton edit, then phone contact list, then the customer's own WhatsApp name, then number. */
+export const CONTACT_NAME_SQL =
+  "COALESCE(ct.name, ct.saved_name, ct.wa_name, CASE WHEN ct.phone = ct.lid THEN NULL ELSE ct.phone END, '未知號碼')"
+/** The real phone number, or NULL while WhatsApp still hides it behind a LID. */
+export const CONTACT_PHONE_SQL = 'CASE WHEN ct.phone = ct.lid THEN NULL ELSE ct.phone END'
+
 let depth = 0
 
 /** Run fn atomically. Nested calls become savepoints inside the outer transaction. */

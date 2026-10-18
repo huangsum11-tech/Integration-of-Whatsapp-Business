@@ -4,7 +4,7 @@
  * about how they like to sound.
  */
 import Anthropic from '@anthropic-ai/sdk'
-import { all, get } from './db.js'
+import { CONTACT_NAME_SQL, all, get } from './db.js'
 
 const MODEL = process.env.BATON_AI_MODEL ?? 'claude-opus-5-5'
 let client: Anthropic | undefined
@@ -38,7 +38,7 @@ export async function draftReply(conversationId: number, userId: number, instruc
   ).map((r) => r.body)
 
   const conversation = get<{ contact_name: string; number_label: string }>(
-    `SELECT COALESCE(ct.name, ct.wa_name, ct.phone) AS contact_name, n.label AS number_label
+    `SELECT ${CONTACT_NAME_SQL} AS contact_name, n.label AS number_label
      FROM conversations c JOIN contacts ct ON ct.id = c.contact_id JOIN numbers n ON n.id = c.number_id
      WHERE c.id = ?`,
     conversationId,

@@ -81,7 +81,7 @@ tx(() => {
     const start = now - t.daysAgo * DAY - 3 * 3600
     t.lines.forEach(([fromMe, minutes, body, sender, type], i) => {
       const stored = storeMessage({
-        numberId: t.number, jid: `${t.phone}@s.whatsapp.net`, phone: t.phone, waName: t.name,
+        numberId: t.number, jid: `${t.phone}@s.whatsapp.net`, contact: { pn: t.phone }, waName: t.name,
         waId: `seed-${t.number}-${t.phone}-${i}`, fromMe: Boolean(fromMe), senderId: sender ?? null,
         type: (type as any) ?? 'text', body, ts: Math.min(start + minutes * 60, now - 60), live: true,
       })

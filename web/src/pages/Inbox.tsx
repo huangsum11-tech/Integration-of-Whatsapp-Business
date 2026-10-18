@@ -216,7 +216,7 @@ function Thread({ detail }: { detail: Detail }) {
         <Avatar name={conversation.contact_name} size={40} />
         <div className="who">
           <b>{conversation.contact_name}</b>
-          <div className="muted" style={{ fontSize: 12 }}>{formatPhone(conversation.phone)} · 經 <b style={{ fontWeight: 500 }}>{conversation.number_label}</b></div>
+          <div className="muted" style={{ fontSize: 12 }}>{formatPhone(conversation.phone) || '號碼未同步'} · 經 <b style={{ fontWeight: 500 }}>{conversation.number_label}</b></div>
         </div>
         <button className="btn sm" onClick={() => setHandoffOpen(true)}>
           {assignee ? <Avatar name={assignee.name} color={assignee.color} size={18} /> : <Icon name="user" size={16} />}
@@ -400,12 +400,14 @@ function SidePanel({ detail, reload }: { detail: Detail; reload: () => void }) {
   return (
     <aside className="side-pane" aria-label="客戶資料">
       <div className="contact-hero">
-        <Avatar name={contact.name || contact.wa_name || contact.phone} size={64} />
+        <Avatar name={contact.name || contact.saved_name || contact.wa_name || contact.phone || '?'} size={64} />
         <input className="input" style={{ textAlign: 'center', fontWeight: 700, fontSize: 16, border: '1px solid transparent' }}
-          value={name} placeholder={contact.wa_name ?? '加入名稱'} onChange={(e) => setName(e.target.value)}
+          value={name} placeholder={contact.saved_name ?? contact.wa_name ?? '加入名稱'} onChange={(e) => setName(e.target.value)}
           onBlur={() => name !== (contact.name ?? '') && saveContact({ name: name || null })} aria-label="客戶名稱" />
-        <span className="muted">{formatPhone(contact.phone)}</span>
-        {contact.wa_name && contact.wa_name !== contact.name && <span className="faint" style={{ fontSize: 12 }}>WhatsApp 名稱：{contact.wa_name}</span>}
+        <span className="muted">{formatPhone(contact.phone) || '號碼未同步'}</span>
+        {contact.saved_name && contact.name && contact.saved_name !== contact.name && <span className="faint" style={{ fontSize: 12 }}>手機通訊錄：{contact.saved_name}</span>}
+        {contact.wa_name && contact.wa_name !== (contact.name ?? contact.saved_name) && <span className="faint" style={{ fontSize: 12 }}>WhatsApp 名稱：{contact.wa_name}</span>}
+        {!contact.phone && <span className="faint" style={{ fontSize: 12, maxWidth: 240 }}>WhatsApp 暫時隱藏了此客戶的電話號碼，同步後會自動補上</span>}
       </div>
 
       <div className="side-section">
