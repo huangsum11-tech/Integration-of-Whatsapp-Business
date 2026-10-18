@@ -73,6 +73,10 @@ npm start                      # http://localhost:4000
 - **示範帳戶**（執行 seed 後）：`karen@baton.demo` ／ `baton-demo`。示範號碼不會連接 WhatsApp，但可以完整試用收件匣、交接、AI 草擬及分析。
 - **正式使用：** 不執行 seed，直接開啟網頁，第一位用戶會成為管理員。然後到「號碼 → 連接新號碼」，在手機打開 WhatsApp Business → 設定 → 已連結的裝置 → 連結裝置，掃描 QR Code。
 
+### 用手機測試（同一個 Wi-Fi）
+
+`npm start` 啟動後，終端機會顯示「手機（同一個 Wi-Fi）打開：http://192.168.x.x:4000」和一個 QR Code。手機連接同一個 Wi-Fi，用相機掃描 QR Code 或輸入網址即可。打不開的話，檢查電腦防火牆是否容許 Node.js 接收連線。
+
 開發模式（前端熱重載，`/api` 經 Vite proxy 轉到 4000）：
 
 ```bash

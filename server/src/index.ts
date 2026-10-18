@@ -1,9 +1,11 @@
 import fs from 'node:fs'
 import http from 'node:http'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import cookieParser from 'cookie-parser'
 import express, { type NextFunction, type Request, type Response } from 'express'
+import QRCode from 'qrcode'
 import { Server } from 'socket.io'
 import { ZodError } from 'zod'
 import { SESSION_COOKIE, userForToken } from './auth.js'
@@ -48,7 +50,25 @@ io.use((socket, next) => {
 io.on('connection', (socket) => socket.join('team'))
 setIo(io)
 
-server.listen(PORT, () => {
-  console.log(`Baton 接棒 running on http://localhost:${PORT}`)
+/** This computer's addresses on the local network, so phones on the same Wi-Fi can connect. */
+function lanAddresses() {
+  return Object.values(os.networkInterfaces())
+    .flat()
+    .filter((a) => a && a.family === 'IPv4' && !a.internal)
+    .map((a) => a!.address)
+    // Home and office Wi-Fi is usually 192.168.x.x; VPN and Docker adapters tend to use 10.x or 172.x.
+    .sort((a, b) => Number(b.startsWith('192.168.')) - Number(a.startsWith('192.168.')))
+}
+
+server.listen(PORT, async () => {
+  console.log(`\nBaton 接棒 running on http://localhost:${PORT}`)
+  const [first, ...rest] = lanAddresses()
+  if (first) {
+    const url = `http://${first}:${PORT}`
+    console.log(`\n手機（同一個 Wi-Fi）打開：${url}`)
+    for (const ip of rest) console.log(`  打不開的話試：http://${ip}:${PORT}`)
+    console.log('\n或用手機相機掃描：')
+    console.log(await QRCode.toString(url, { type: 'terminal', small: true }))
+  }
   restoreAll().catch((err) => console.error('Failed to restore WhatsApp sessions', err))
 })
