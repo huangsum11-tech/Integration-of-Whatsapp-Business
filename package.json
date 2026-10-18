@@ -1,0 +1,13 @@
+{
+  "name": "baton",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Baton 接棒 — turn your existing WhatsApp Business numbers into a shared team inbox",
+  "workspaces": ["server", "web"],
+  "scripts": {
+    "dev": "npm run dev --workspace server & npm run dev --workspace web",
+    "build": "npm run build --workspace web && npm run typecheck --workspace server",
+    "start": "npm run start --workspace server",
+    "typecheck": "npm run typecheck --workspace server && npm run typecheck --workspace web"
+  }
+}
