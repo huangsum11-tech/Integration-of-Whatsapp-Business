@@ -26,12 +26,22 @@ export interface Conversation {
   status: 'open' | 'closed'; unread: number; last_message_at: number; last_preview: string
   /** Null while WhatsApp hides the customer's number behind a LID. */
   phone: string | null; contact_name: string; number_label: string; number_phone: string | null
+  channel: Channel; reply_mode: ReplyMode
+  /** 1 once a teammate (or an AI handoff) took over from automatic replies. */
+  ai_paused: number
+  /** The AI's suggested reply, waiting for a teammate (reply mode 'suggest'). */
+  ai_suggestion: string | null
 }
+
+export type Channel = 'wa_web' | 'wa_cloud' | 'instagram'
+export type ReplyMode = 'off' | 'suggest' | 'auto'
 
 export interface Message {
   item: 'message'; id: number; conversation_id: number; wa_id: string; from_me: number
   sender_id: number | null; sender_name: string | null; type: string; body: string
   media_path: string | null; media_mime: string | null; ts: number; ai_assisted: number
+  /** Sent by the AI on its own. */
+  ai_auto: number
 }
 
 export interface InboxEvent {
@@ -42,6 +52,8 @@ export interface InboxEvent {
 export interface Contact {
   id: number; phone: string | null; lid: string | null; name: string | null; saved_name: string | null
   wa_name: string | null; notes: string
+  /** 1 for Instagram customers, who have no phone number. */
+  instagram?: number
   owner_id: number | null; display_name?: string; owner_name?: string | null
   conversations?: number; numbers?: string | null; last_message_at?: number | null; won_amount?: number
 }
@@ -53,5 +65,19 @@ export interface Deal {
 
 export interface WaNumber {
   id: number; label: string; phone: string | null; status: string; demo: number
-  conversations: number; qr: string | null
+  conversations: number; qr: string | null; channel: Channel; reply_mode: ReplyMode
+  /** Official API IDs (never the access token). */
+  ids: { phoneNumberId?: string; igUserId?: string; username?: string }
+}
+
+export type KnowledgeCategory = 'faq' | 'policy' | 'class' | 'other'
+
+export interface Knowledge {
+  id: number; category: KnowledgeCategory; title: string; body: string; keywords: string; active: number; updated_at: number
+}
+
+export interface AiSettings {
+  provider: string; model: string
+  providers: { id: string; label: string; keyEnv: string; hasKey: boolean; defaultModel: string; model: string }[]
+  business_name: string; business_intro: string; handoff_message: string
 }

@@ -152,11 +152,49 @@ CREATE TABLE IF NOT EXISTS lid_map (lid TEXT PRIMARY KEY, pn TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS phonebook (key TEXT PRIMARY KEY, name TEXT NOT NULL);
 `)
 
-/** Display name: Baton edit, then phone contact list, then the customer's own WhatsApp name, then number. */
+// How a number is connected: 'wa_web' (QR linked device), 'wa_cloud' (official WhatsApp
+// Cloud API) or 'instagram' (Instagram Messaging API). config holds the API credentials.
+if (!columns('numbers').includes('channel')) db.exec("ALTER TABLE numbers ADD COLUMN channel TEXT NOT NULL DEFAULT 'wa_web'")
+if (!columns('numbers').includes('config')) db.exec("ALTER TABLE numbers ADD COLUMN config TEXT NOT NULL DEFAULT '{}'")
+// What the AI does when a customer writes: 'off', 'suggest' (draft for a teammate) or 'auto' (reply directly).
+if (!columns('numbers').includes('reply_mode')) db.exec("ALTER TABLE numbers ADD COLUMN reply_mode TEXT NOT NULL DEFAULT 'off'")
+// A teammate took over (or the AI handed off): no more automatic replies until resumed or closed.
+if (!columns('conversations').includes('ai_paused')) db.exec('ALTER TABLE conversations ADD COLUMN ai_paused INTEGER NOT NULL DEFAULT 0')
+// The AI's suggested reply waiting for a teammate (reply mode 'suggest').
+if (!columns('conversations').includes('ai_suggestion')) db.exec('ALTER TABLE conversations ADD COLUMN ai_suggestion TEXT')
+// Sent by the AI on its own, with no teammate reviewing it.
+if (!columns('messages').includes('ai_auto')) db.exec('ALTER TABLE messages ADD COLUMN ai_auto INTEGER NOT NULL DEFAULT 0')
+db.exec(`
+-- What the AI is allowed to say: FAQ answers, company policies, class information.
+CREATE TABLE IF NOT EXISTS knowledge (
+  id INTEGER PRIMARY KEY,
+  category TEXT NOT NULL DEFAULT 'policy' CHECK (category IN ('faq','policy','class','other')),
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  -- FAQ only: comma-separated words that trigger this exact answer without calling the AI.
+  keywords TEXT NOT NULL DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+`)
+
+export function getSetting(key: string, fallback = ''): string {
+  return get<{ value: string }>('SELECT value FROM settings WHERE key = ?', key)?.value ?? fallback
+}
+
+export function setSetting(key: string, value: string) {
+  run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value', key, value)
+}
+
+/** Instagram customers have no phone number; their contact row is keyed by "ig:<Instagram-scoped ID>". */
+const NO_PHONE_SQL = "ct.phone = ct.lid OR ct.phone LIKE 'ig:%'"
+/** Display name: Baton edit, then phone contact list, then the customer's own WhatsApp/Instagram name, then number. */
 export const CONTACT_NAME_SQL =
-  "COALESCE(ct.name, ct.saved_name, ct.wa_name, CASE WHEN ct.phone = ct.lid THEN NULL ELSE ct.phone END, '未知號碼')"
-/** The real phone number, or NULL while WhatsApp still hides it behind a LID. */
-export const CONTACT_PHONE_SQL = 'CASE WHEN ct.phone = ct.lid THEN NULL ELSE ct.phone END'
+  `COALESCE(ct.name, ct.saved_name, ct.wa_name, CASE WHEN ${NO_PHONE_SQL} THEN NULL ELSE ct.phone END,
+    CASE WHEN ct.phone LIKE 'ig:%' THEN 'Instagram 用戶' ELSE '未知號碼' END)`
+/** The real phone number, or NULL while WhatsApp still hides it behind a LID (or for Instagram customers). */
+export const CONTACT_PHONE_SQL = `CASE WHEN ${NO_PHONE_SQL} THEN NULL ELSE ct.phone END`
 
 let depth = 0
 

@@ -24,6 +24,11 @@ const PATHS: Record<string, ReactNode> = {
   image: <><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-5-5L5 21" /></>,
   file: <><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><path d="M14 3v6h6" /></>,
   user: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
+  instagram: <><rect x="3" y="3" width="18" height="18" rx="5" /><circle cx="12" cy="12" r="4" /><path d="M17.5 6.5h.01" /></>,
+  bot: <><rect x="4" y="8" width="16" height="12" rx="3" /><path d="M12 8V4M9 14h.01M15 14h.01" /></>,
+  pause: <><path d="M9 5v14M15 5v14" /></>,
+  play: <path d="M7 4l13 8-13 8z" />,
+  book: <><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z" /><path d="M4 19.5V21h16" /></>,
   trophy: <><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z" /><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3" /></>,
 }
 
@@ -78,6 +83,7 @@ export function NumberStatus({ status }: { status: string }) {
     logged_out: ['coral', '已登出'],
     unlinked: ['', '已解除連結'],
     disconnected: ['', '未連接'],
+    connected_api: ['pine', '已連接（官方 API）'],
   }
   const [tone, label] = map[status] ?? ['', status]
   return <span className={`chip ${tone}`}><span className="led" />{label}</span>

@@ -3,6 +3,7 @@ import { api, ApiError, type User, type WaNumber } from './api'
 import { Icon, Logo, type IconName } from './components'
 import { closeSocket, getSocket } from './socket'
 import Analytics from './pages/Analytics'
+import Assistant from './pages/Assistant'
 import Contacts from './pages/Contacts'
 import Inbox from './pages/Inbox'
 import Numbers from './pages/Numbers'
@@ -24,6 +25,7 @@ const ROUTES: { path: string; label: string; icon: IconName }[] = [
   { path: 'inbox', label: '收件匣', icon: 'inbox' },
   { path: 'contacts', label: '聯絡簿', icon: 'contacts' },
   { path: 'analytics', label: '分析', icon: 'chart' },
+  { path: 'ai', label: 'AI 助手', icon: 'sparkle' },
   { path: 'numbers', label: '號碼', icon: 'phone' },
   { path: 'team', label: '團隊', icon: 'team' },
 ]
@@ -106,6 +108,7 @@ function Shell({ me, setMe, onLogout }: { me: User; setMe: (u: User) => void; on
           {page === 'inbox' && <Inbox conversationId={route[1] ? Number(route[1]) : null} />}
           {page === 'contacts' && <Contacts />}
           {page === 'analytics' && <Analytics />}
+          {page === 'ai' && <Assistant />}
           {page === 'numbers' && <Numbers />}
           {page === 'team' && <Team />}
         </main>
@@ -136,7 +139,8 @@ function Auth({ setup, onDone }: { setup: boolean; onDone: () => void }) {
     ['qr', '掃 QR Code 即用，每個號碼約一分鐘連接'],
     ['inbox', '整個團隊在同一處回覆，對話可以交接'],
     ['archive', '訊息、相片、語音與文件自動備份'],
-    ['sparkle', 'AI 以每位同事的語氣草擬回覆'],
+    ['sparkle', 'AI 根據公司知識庫回答客人，不確定就轉交同事'],
+    ['instagram', 'WhatsApp 與 Instagram 私訊集中一處'],
     ['shield', '同事離職時，客戶關係留在公司'],
   ]
 

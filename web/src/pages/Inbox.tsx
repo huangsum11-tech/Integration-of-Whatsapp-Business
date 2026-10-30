@@ -207,6 +207,10 @@ function Thread({ detail }: { detail: Detail }) {
 
   const toggleStatus = () =>
     api(`/conversations/${conversation.id}`, { method: 'PATCH', body: { status: conversation.status === 'open' ? 'closed' : 'open' } })
+  const toggleAi = () => api(`/conversations/${conversation.id}/ai`, { body: { paused: !conversation.ai_paused } })
+  const useSuggestion = () => { setText(conversation.ai_suggestion ?? ''); setAiDraft(true); setMode('reply') }
+  const dismissSuggestion = () => api(`/conversations/${conversation.id}/suggestion`, { method: 'DELETE' })
+  const showSuggestion = mode === 'reply' && conversation.ai_suggestion && !text
 
   let lastDay = ''
   return (
@@ -216,8 +220,15 @@ function Thread({ detail }: { detail: Detail }) {
         <Avatar name={conversation.contact_name} size={40} />
         <div className="who">
           <b>{conversation.contact_name}</b>
-          <div className="muted" style={{ fontSize: 12 }}>{formatPhone(conversation.phone) || '號碼未同步'} · 經 <b style={{ fontWeight: 500 }}>{conversation.number_label}</b></div>
+          <div className="muted" style={{ fontSize: 12 }}>{conversation.channel === 'instagram' ? 'Instagram' : formatPhone(conversation.phone) || '號碼未同步'} · 經 <b style={{ fontWeight: 500 }}>{conversation.number_label}</b></div>
         </div>
+        {conversation.reply_mode === 'auto' && (
+          <button className={`btn sm ${conversation.ai_paused ? '' : 'ai'}`} onClick={toggleAi}
+            title={conversation.ai_paused ? '讓 AI 繼續自動回覆這位客人' : '暫停 AI，由同事回覆'}>
+            <Icon name={conversation.ai_paused ? 'play' : 'pause'} size={14} />
+            <span className="btn-label">{conversation.ai_paused ? '恢復 AI' : 'AI 自動回覆中'}</span>
+          </button>
+        )}
         <button className="btn sm" onClick={() => setHandoffOpen(true)}>
           {assignee ? <Avatar name={assignee.name} color={assignee.color} size={18} /> : <Icon name="user" size={16} />}
           <span className="btn-label">{assignee ? assignee.name.split(' ')[0] : '分配'}</span>
@@ -248,6 +259,16 @@ function Thread({ detail }: { detail: Detail }) {
           <button className={`mode ${mode === 'reply' ? 'active' : ''}`} onClick={() => setMode('reply')}>回覆客戶</button>
           <button className={`mode note-mode ${mode === 'note' ? 'active' : ''}`} onClick={() => setMode('note')}>內部備註</button>
         </div>
+        {showSuggestion && (
+          <div className="suggestion">
+            <div className="suggestion-head"><Icon name="sparkle" size={14} />AI 建議回覆</div>
+            <div className="suggestion-text">{conversation.ai_suggestion}</div>
+            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+              <button className="btn ghost sm" onClick={dismissSuggestion}>捨棄</button>
+              <button className="btn ai sm" onClick={useSuggestion}>使用並修改</button>
+            </div>
+          </div>
+        )}
         {aiDraft && mode === 'reply' && (
           <div className="draft-banner">
             <Icon name="sparkle" size={14} />
@@ -302,8 +323,8 @@ function Bubble({ m }: { m: Message }) {
         {showBody && m.body}
       </div>
       <div className="bubble-meta">
-        {m.from_me ? <span>{m.sender_name ?? '由手機發送'}</span> : null}
-        {m.ai_assisted ? <span className="chip iris" style={{ fontSize: 10, padding: '0 6px' }}><Icon name="sparkle" size={10} />AI 草擬</span> : null}
+        {m.from_me ? <span>{m.ai_auto ? 'AI 助手' : m.sender_name ?? '由手機發送'}</span> : null}
+        {m.ai_assisted ? <span className="chip iris" style={{ fontSize: 10, padding: '0 6px' }}><Icon name="sparkle" size={10} />{m.ai_auto ? 'AI 自動回覆' : 'AI 草擬'}</span> : null}
         <span>{clock(m.ts)}</span>
       </div>
     </div>
@@ -330,10 +351,14 @@ function EventLine({ e }: { e: InboxEvent }) {
     offboard: `同事離職，對話已轉交 ${target}`,
     deal_won: `${who} 成交：${e.body}`,
     deal_lost: `${who} 標記失單：${e.body}`,
+    ai_handoff: 'AI 轉交同事處理',
+    ai_paused: e.user_id ? `${who} 暫停了 AI 自動回覆` : 'AI 自動回覆已暫停',
+    ai_resumed: `${who} 恢復了 AI 自動回覆`,
+    ai_error: 'AI 回覆失敗',
   }
   return (
-    <div className={`event ${e.kind === 'handoff' || e.kind === 'offboard' ? 'handoff' : ''}`}>
-      <Icon name={e.kind.startsWith('deal') ? 'trophy' : e.kind === 'close' ? 'check' : 'handoff'} size={13} />
+    <div className={`event ${e.kind === 'handoff' || e.kind === 'offboard' || e.kind === 'ai_handoff' || e.kind === 'ai_error' ? 'handoff' : ''}`}>
+      <Icon name={e.kind.startsWith('deal') ? 'trophy' : e.kind === 'close' ? 'check' : e.kind.startsWith('ai_') ? 'sparkle' : 'handoff'} size={13} />
       <span>{text[e.kind] ?? e.kind}{e.body && !e.kind.startsWith('deal') ? `：「${e.body}」` : ''} · {clock(e.ts)}</span>
     </div>
   )
@@ -404,10 +429,10 @@ function SidePanel({ detail, reload }: { detail: Detail; reload: () => void }) {
         <input className="input" style={{ textAlign: 'center', fontWeight: 700, fontSize: 16, border: '1px solid transparent' }}
           value={name} placeholder={contact.saved_name ?? contact.wa_name ?? '加入名稱'} onChange={(e) => setName(e.target.value)}
           onBlur={() => name !== (contact.name ?? '') && saveContact({ name: name || null })} aria-label="客戶名稱" />
-        <span className="muted">{formatPhone(contact.phone) || '號碼未同步'}</span>
+        <span className="muted">{contact.instagram ? 'Instagram 用戶' : formatPhone(contact.phone) || '號碼未同步'}</span>
         {contact.saved_name && contact.name && contact.saved_name !== contact.name && <span className="faint" style={{ fontSize: 12 }}>手機通訊錄：{contact.saved_name}</span>}
-        {contact.wa_name && contact.wa_name !== (contact.name ?? contact.saved_name) && <span className="faint" style={{ fontSize: 12 }}>WhatsApp 名稱：{contact.wa_name}</span>}
-        {!contact.phone && <span className="faint" style={{ fontSize: 12, maxWidth: 240 }}>WhatsApp 暫時隱藏了此客戶的電話號碼，同步後會自動補上</span>}
+        {contact.wa_name && contact.wa_name !== (contact.name ?? contact.saved_name) && <span className="faint" style={{ fontSize: 12 }}>{contact.instagram ? 'Instagram' : 'WhatsApp'} 名稱：{contact.wa_name}</span>}
+        {!contact.phone && !contact.instagram && <span className="faint" style={{ fontSize: 12, maxWidth: 240 }}>WhatsApp 暫時隱藏了此客戶的電話號碼，同步後會自動補上</span>}
       </div>
 
       <div className="side-section">

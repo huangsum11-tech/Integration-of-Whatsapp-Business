@@ -10,22 +10,25 @@ import { Server } from 'socket.io'
 import { ZodError } from 'zod'
 import { SESSION_COOKIE, userForToken } from './auth.js'
 import { setIo } from './realtime.js'
-import { api, media } from './routes.js'
+import './autoreply.js'
+import { api, media, webhooks } from './routes.js'
 import { restoreAll } from './whatsapp.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.PORT ?? 4000)
 
 const app = express()
-app.use(express.json({ limit: '1mb' }))
+// Keep the raw body: Meta webhook signatures are computed over the exact bytes.
+app.use(express.json({ limit: '1mb', verify: (req, _res, buf) => { (req as { rawBody?: Buffer }).rawBody = buf } }))
 app.use(cookieParser())
+app.use('/webhooks', webhooks)
 app.use('/api', api)
 app.use('/media', media)
 
 const webDist = path.resolve(here, '../../web/dist')
 if (fs.existsSync(webDist)) {
   app.use(express.static(webDist))
-  app.get(/^\/(?!api|media|socket\.io).*/, (_req, res) => res.sendFile(path.join(webDist, 'index.html')))
+  app.get(/^\/(?!api|media|webhooks|socket\.io).*/, (_req, res) => res.sendFile(path.join(webDist, 'index.html')))
 }
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
@@ -69,6 +72,9 @@ server.listen(PORT, async () => {
     for (const ip of rest) console.log(`  打不開的話試：http://${ip}:${PORT}`)
     console.log('\n或用手機相機掃描：')
     console.log(await QRCode.toString(url, { type: 'terminal', small: true }))
+  }
+  if (!process.env.META_APP_SECRET && !process.env.INSTAGRAM_APP_SECRET) {
+    console.warn('未設定 META_APP_SECRET：/webhooks/meta 不會驗證 Meta 簽名，正式使用前請設定')
   }
   restoreAll().catch((err) => console.error('Failed to restore WhatsApp sessions', err))
 })

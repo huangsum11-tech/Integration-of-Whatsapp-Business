@@ -1,15 +1,18 @@
 import path from 'node:path'
 import express, { type Request, type Response } from 'express'
 import { z } from 'zod'
-import { AiUnavailableError, draftReply } from './ai.js'
+import { AiUnavailableError, draftReply, testReply } from './ai.js'
 import { teamAnalytics } from './analytics.js'
 import {
   SESSION_COOKIE, createSession, hashPassword, requireAdmin, requireUser, verifyPassword,
 } from './auth.js'
-import { CONTACT_NAME_SQL, CONTACT_PHONE_SQL, all, get, run, tx } from './db.js'
-import { addEvent, getConversation, getTimeline, listConversations, storeMessage } from './inbox.js'
+import { canSend, sendReply } from './channels.js'
+import { CONTACT_NAME_SQL, CONTACT_PHONE_SQL, all, get, getSetting, run, setSetting, tx } from './db.js'
+import { addEvent, getConversation, getTimeline, listConversations } from './inbox.js'
+import { PROVIDERS, currentAi, hasKey, type Provider } from './llm.js'
+import { handleWebhook, validSignature, verifyCloud, verifyInstagram } from './meta.js'
 import { broadcast } from './realtime.js'
-import { MEDIA_DIR, connectNumber, currentQr, disconnectNumber, isConnected, sendText, syncContacts } from './whatsapp.js'
+import { MEDIA_DIR, connectNumber, currentQr, disconnectNumber, isConnected, syncContacts } from './whatsapp.js'
 
 export const api = express.Router()
 
@@ -118,36 +121,104 @@ api.post('/users/:id/offboard', requireAdmin, (req, res) => {
   res.json(moved)
 })
 
-// ---------- WhatsApp numbers ----------
+// ---------- WhatsApp & Instagram numbers ----------
 
 api.get('/numbers', (_req, res) => {
-  const numbers = all(
+  const numbers = all<{ id: number; config: string }>(
     `SELECT n.*, (SELECT COUNT(*) FROM conversations c WHERE c.number_id = n.id) AS conversations
      FROM numbers n ORDER BY n.id`,
   )
-  res.json(numbers.map((n) => ({ ...n, qr: currentQr(n.id) ?? null })))
+  // Access tokens never leave the server; only the IDs are shown.
+  res.json(numbers.map(({ config, ...n }) => {
+    const { accessToken: _token, ...ids } = JSON.parse(config || '{}')
+    return { ...n, ids, qr: currentQr(n.id) ?? null }
+  }))
 })
 
+const newNumber = z.discriminatedUnion('channel', [
+  z.object({ channel: z.literal('wa_web'), label: z.string().min(1).max(60) }),
+  z.object({
+    channel: z.literal('wa_cloud'), label: z.string().min(1).max(60),
+    phoneNumberId: z.string().regex(/^\d+$/, '電話號碼 ID 只包含數字'), accessToken: z.string().min(20),
+  }),
+  z.object({ channel: z.literal('instagram'), label: z.string().min(1).max(60), accessToken: z.string().min(20) }),
+])
+
+/** Check official API credentials with Meta before saving them. */
+async function officialConfig(b: z.infer<typeof newNumber>) {
+  if (b.channel === 'wa_cloud') {
+    const info = await verifyCloud({ phoneNumberId: b.phoneNumberId, accessToken: b.accessToken })
+    return { phone: info.phone, key: 'phoneNumberId', id: b.phoneNumberId, config: { phoneNumberId: b.phoneNumberId, accessToken: b.accessToken } }
+  }
+  if (b.channel === 'instagram') {
+    const info = await verifyInstagram(b.accessToken)
+    return {
+      phone: info.username ? `@${info.username}` : null, key: 'igUserId', id: info.igUserId,
+      config: { igUserId: info.igUserId, username: info.username, accessToken: b.accessToken },
+    }
+  }
+  throw new Error('不支援的連接方式')
+}
+
 api.post('/numbers', requireAdmin, async (req, res) => {
-  const { label } = body(z.object({ label: z.string().min(1).max(60) }), req)
-  const id = Number(run("INSERT INTO numbers (label, status) VALUES (?, 'starting')", label).lastInsertRowid)
-  await connectNumber(id)
+  // Older clients send only a label, meaning a QR-linked number.
+  const b = body(z.preprocess((v) => ({ channel: 'wa_web', ...(v as object) }), newNumber), req)
+  if (b.channel === 'wa_web') {
+    const id = Number(run("INSERT INTO numbers (label, status) VALUES (?, 'starting')", b.label).lastInsertRowid)
+    await connectNumber(id)
+    return res.json({ id })
+  }
+  let official
+  try {
+    official = await officialConfig(b)
+  } catch (err) {
+    return res.status(400).json({ error: err instanceof Error ? err.message : '未能驗證連接資料' })
+  }
+  const existing = get<{ id: number }>(
+    `SELECT id FROM numbers WHERE channel = ? AND json_extract(config, '$.${official.key}') = ?`, b.channel, official.id,
+  )
+  if (existing) {
+    // Reconnecting the same account (e.g. with a new token) keeps its conversations.
+    run("UPDATE numbers SET label = ?, phone = ?, config = ?, status = 'connected' WHERE id = ?", b.label, official.phone, JSON.stringify(official.config), existing.id)
+    broadcast('number', { id: existing.id, status: 'connected' })
+    return res.json({ id: existing.id })
+  }
+  const id = Number(run("INSERT INTO numbers (label, phone, channel, config, status) VALUES (?, ?, ?, ?, 'connected')",
+    b.label, official.phone, b.channel, JSON.stringify(official.config)).lastInsertRowid)
   res.json({ id })
+})
+
+api.patch('/numbers/:id', requireAdmin, (req, res) => {
+  const id = Number(req.params.id)
+  const b = body(z.object({ label: z.string().min(1).max(60).optional(), reply_mode: z.enum(['off', 'suggest', 'auto']).optional() }), req)
+  if (!get('SELECT id FROM numbers WHERE id = ?', id)) return res.status(404).json({ error: '找不到號碼' })
+  if (b.label) run('UPDATE numbers SET label = ? WHERE id = ?', b.label, id)
+  if (b.reply_mode) run('UPDATE numbers SET reply_mode = ? WHERE id = ?', b.reply_mode, id)
+  broadcast('number', { id, ...b })
+  res.json({ ok: true })
 })
 
 api.post('/numbers/:id/reconnect', requireAdmin, async (req, res) => {
   const id = Number(req.params.id)
-  const number = get<{ demo: number }>('SELECT demo FROM numbers WHERE id = ?', id)
+  const number = get<{ demo: number; channel: string }>('SELECT demo, channel FROM numbers WHERE id = ?', id)
   if (!number) return res.status(404).json({ error: '找不到號碼' })
   if (number.demo) return res.status(400).json({ error: '示範號碼不能連接' })
+  if (number.channel !== 'wa_web') return res.status(400).json({ error: '官方 API 號碼請用「連接新號碼」重新輸入存取權杖' })
   await connectNumber(id)
   res.json({ ok: true })
 })
 
-/** Unlink the device. Conversations, contacts and media remain in the company's backup. */
+/** Unlink the device (or forget the API token). Conversations, contacts and media remain in the company's backup. */
 api.post('/numbers/:id/unlink', requireAdmin, async (req, res) => {
   const id = Number(req.params.id)
-  await disconnectNumber(id, true)
+  const number = get<{ channel: string; config: string }>('SELECT channel, config FROM numbers WHERE id = ?', id)
+  if (!number) return res.status(404).json({ error: '找不到號碼' })
+  if (number.channel === 'wa_web') {
+    await disconnectNumber(id, true)
+  } else {
+    const { accessToken: _token, ...ids } = JSON.parse(number.config || '{}')
+    run('UPDATE numbers SET config = ? WHERE id = ?', JSON.stringify(ids), id)
+  }
   run("UPDATE numbers SET status = 'unlinked' WHERE id = ?", id)
   broadcast('number', { id, status: 'unlinked' })
   res.json({ ok: true })
@@ -156,7 +227,7 @@ api.post('/numbers/:id/unlink', requireAdmin, async (req, res) => {
 /** Fill in hidden phone numbers and re-download saved names from the phone's contact list. */
 api.post('/numbers/:id/sync-contacts', requireAdmin, async (req, res) => {
   const id = Number(req.params.id)
-  if (!isConnected(id)) return res.status(409).json({ error: '此號碼未連接' })
+  if (!isConnected(id)) return res.status(409).json({ error: '此號碼未連接（只適用於 QR Code 連接的號碼）' })
   res.json(await syncContacts(id, undefined, true))
 })
 
@@ -198,11 +269,6 @@ api.get('/conversations/:id', (req, res) => {
   res.json({ conversation, contact, deals, otherConversations, timeline: getTimeline(id), canSend: canSend(conversation.number_id) })
 })
 
-function canSend(numberId: number) {
-  const n = get<{ demo: number }>('SELECT demo FROM numbers WHERE id = ?', numberId)
-  return Boolean(n?.demo) || isConnected(numberId)
-}
-
 api.post('/conversations/:id/read', (req, res) => {
   const id = Number(req.params.id)
   run('UPDATE conversations SET unread = 0 WHERE id = ?', id)
@@ -213,7 +279,11 @@ api.post('/conversations/:id/read', (req, res) => {
 api.patch('/conversations/:id', (req, res) => {
   const id = Number(req.params.id)
   const { status } = body(z.object({ status: z.enum(['open', 'closed']) }), req)
-  run('UPDATE conversations SET status = ? WHERE id = ?', status, id)
+  // Closing ends the human takeover: the AI handles this customer's next question again.
+  run(`UPDATE conversations SET status = ?1,
+         ai_paused = CASE WHEN ?1 = 'closed' THEN 0 ELSE ai_paused END,
+         ai_suggestion = CASE WHEN ?1 = 'closed' THEN NULL ELSE ai_suggestion END
+       WHERE id = ?2`, status, id)
   addEvent(id, req.user.id, status === 'closed' ? 'close' : 'reopen')
   broadcast('conversation', getConversation(id))
   res.json({ ok: true })
@@ -242,22 +312,30 @@ api.post('/conversations/:id/messages', async (req, res) => {
   const b = body(z.object({ text: z.string().min(1).max(4096), aiAssisted: z.boolean().default(false) }), req)
   const conversation = getConversation(id)
   if (!conversation) return res.status(404).json({ error: '找不到對話' })
-  const number = get<{ demo: number }>('SELECT demo FROM numbers WHERE id = ?', conversation.number_id)
   // Replying claims an unassigned conversation, so two teammates don't answer the same customer.
   if (!conversation.assignee_id) {
     run('UPDATE conversations SET assignee_id = ? WHERE id = ?', req.user.id, id)
     addEvent(id, req.user.id, 'assign', '', req.user.id)
   }
-  if (number?.demo) {
-    storeMessage({
-      numberId: conversation.number_id, jid: conversation.jid, contact: { pn: conversation.phone },
-      waId: `demo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, fromMe: true,
-      senderId: req.user.id, aiAssisted: b.aiAssisted, type: 'text', body: b.text,
-      ts: Math.floor(Date.now() / 1000), live: true,
-    })
-  } else {
-    await sendText(conversation.number_id, conversation.jid, b.text, req.user.id, b.aiAssisted)
-  }
+  await sendReply(id, b.text, { userId: req.user.id, aiAssisted: b.aiAssisted })
+  res.json({ ok: true })
+})
+
+/** Pause or resume automatic AI replies in one conversation. */
+api.post('/conversations/:id/ai', (req, res) => {
+  const id = Number(req.params.id)
+  const { paused } = body(z.object({ paused: z.boolean() }), req)
+  if (!getConversation(id)) return res.status(404).json({ error: '找不到對話' })
+  run('UPDATE conversations SET ai_paused = ? WHERE id = ?', paused ? 1 : 0, id)
+  addEvent(id, req.user.id, paused ? 'ai_paused' : 'ai_resumed')
+  broadcast('conversation', getConversation(id))
+  res.json({ ok: true })
+})
+
+api.delete('/conversations/:id/suggestion', (req, res) => {
+  const id = Number(req.params.id)
+  run('UPDATE conversations SET ai_suggestion = NULL WHERE id = ?', id)
+  broadcast('conversation', getConversation(id))
   res.json({ ok: true })
 })
 
@@ -271,11 +349,87 @@ api.post('/conversations/:id/draft', async (req, res) => {
   }
 })
 
+// ---------- AI: provider, business profile, knowledge base ----------
+
+api.get('/ai/settings', (_req, res) => {
+  const { provider, model } = currentAi()
+  res.json({
+    provider, model,
+    providers: Object.entries(PROVIDERS).map(([id, p]) => ({
+      id, label: p.label, keyEnv: p.keyEnv, hasKey: hasKey(id as Provider), defaultModel: p.defaultModel,
+      model: getSetting(`ai_model_${id}`) || p.defaultModel,
+    })),
+    business_name: getSetting('business_name'),
+    business_intro: getSetting('business_intro'),
+    handoff_message: getSetting('handoff_message'),
+  })
+})
+
+api.put('/ai/settings', requireAdmin, (req, res) => {
+  const b = body(z.object({
+    provider: z.enum(['claude', 'gemini', 'grok']).optional(),
+    model: z.string().max(100).optional(),
+    business_name: z.string().max(120).optional(),
+    business_intro: z.string().max(4000).optional(),
+    handoff_message: z.string().max(500).optional(),
+  }), req)
+  tx(() => {
+    if (b.provider) setSetting('ai_provider', b.provider)
+    if (b.model !== undefined) setSetting(`ai_model_${b.provider ?? currentAi().provider}`, b.model.trim())
+    for (const key of ['business_name', 'business_intro', 'handoff_message'] as const) {
+      if (b[key] !== undefined) setSetting(key, b[key]!)
+    }
+  })
+  res.json({ ok: true })
+})
+
+/** Ask the customer assistant a question without sending anything to anyone. */
+api.post('/ai/test', async (req, res) => {
+  const { question } = body(z.object({ question: z.string().min(1).max(1000) }), req)
+  try {
+    res.json(await testReply(question))
+  } catch (err) {
+    res.status(err instanceof AiUnavailableError ? 503 : 502).json({ error: err instanceof Error ? err.message : 'AI 測試失敗' })
+  }
+})
+
+const knowledgeEntry = z.object({
+  category: z.enum(['faq', 'policy', 'class', 'other']),
+  title: z.string().min(1).max(200),
+  body: z.string().min(1).max(8000),
+  keywords: z.string().max(500).default(''),
+  active: z.boolean().default(true),
+})
+
+api.get('/knowledge', (_req, res) => {
+  res.json(all('SELECT * FROM knowledge ORDER BY category, id'))
+})
+
+api.post('/knowledge', requireAdmin, (req, res) => {
+  const b = body(knowledgeEntry, req)
+  const id = run('INSERT INTO knowledge (category, title, body, keywords, active) VALUES (?, ?, ?, ?, ?)',
+    b.category, b.title, b.body, b.keywords, b.active ? 1 : 0).lastInsertRowid
+  res.json(get('SELECT * FROM knowledge WHERE id = ?', Number(id)))
+})
+
+api.put('/knowledge/:id', requireAdmin, (req, res) => {
+  const id = Number(req.params.id)
+  const b = body(knowledgeEntry, req)
+  run('UPDATE knowledge SET category = ?, title = ?, body = ?, keywords = ?, active = ?, updated_at = unixepoch() WHERE id = ?',
+    b.category, b.title, b.body, b.keywords, b.active ? 1 : 0, id)
+  res.json(get('SELECT * FROM knowledge WHERE id = ?', id))
+})
+
+api.delete('/knowledge/:id', requireAdmin, (req, res) => {
+  run('DELETE FROM knowledge WHERE id = ?', Number(req.params.id))
+  res.json({ ok: true })
+})
+
 // ---------- Company contact book ----------
 
 /** Contact columns with phone hidden (NULL) while WhatsApp only gave us a LID. */
 const CONTACT_COLUMNS = `ct.id, ${CONTACT_PHONE_SQL} AS phone, ct.lid, ct.name, ct.saved_name, ct.wa_name, ct.notes,
-  ct.owner_id, ct.created_at, ct.updated_at`
+  ct.owner_id, ct.created_at, ct.updated_at, ct.phone LIKE 'ig:%' AS instagram`
 
 function getContact(id: number) {
   return get(`SELECT ${CONTACT_COLUMNS} FROM contacts ct WHERE ct.id = ?`, id)
@@ -353,6 +507,30 @@ api.get('/search', (req, res) => {
 api.get('/analytics', (req, res) => {
   const days = Math.min(Math.max(Number(req.query.days ?? 30), 1), 365)
   res.json(teamAnalytics(days))
+})
+
+// ---------- Meta webhook (WhatsApp Cloud API & Instagram) ----------
+
+export const webhooks = express.Router()
+
+/** Meta's one-time check when the webhook URL is saved in the app dashboard. */
+webhooks.get('/meta', (req, res) => {
+  const token = process.env.META_VERIFY_TOKEN
+  if (token && req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === token) {
+    return res.type('text/plain').send(String(req.query['hub.challenge'] ?? ''))
+  }
+  res.sendStatus(403)
+})
+
+webhooks.post('/meta', (req, res) => {
+  if (!validSignature((req as Request & { rawBody?: Buffer }).rawBody, req.get('x-hub-signature-256'))) return res.sendStatus(401)
+  // Acknowledge at once; Meta retries deliveries that take too long.
+  res.sendStatus(200)
+  try {
+    handleWebhook(req.body)
+  } catch (err) {
+    console.error('Webhook handling failed', err)
+  }
 })
 
 // ---------- Backed-up media (signed-in teammates only) ----------

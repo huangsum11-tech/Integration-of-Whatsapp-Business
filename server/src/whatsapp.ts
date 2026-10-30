@@ -34,7 +34,7 @@ const reconnectAttempts = new Map<number, number>()
 /** Numbers deliberately unlinked; their sockets must not auto-reconnect. */
 const stopped = new Set<number>()
 /** Messages sent from Baton, so their echo is attributed to the teammate who sent them. */
-const sentByTeammate = new Map<string, { userId: number; aiAssisted: boolean }>()
+const sentByTeammate = new Map<string, { userId: number | null; aiAssisted: boolean; aiAuto: boolean }>()
 
 const authDir = (numberId: number) => path.join(DATA_DIR, 'auth', String(numberId))
 export const MEDIA_DIR = path.join(DATA_DIR, 'media')
@@ -181,22 +181,24 @@ export async function disconnectNumber(numberId: number, logout: boolean) {
 
 /** Reconnect every number that has saved credentials (on server start). */
 export async function restoreAll() {
-  const numbers = get<{ c: number }>('SELECT COUNT(*) AS c FROM numbers')
+  const numbers = get<{ c: number }>("SELECT COUNT(*) AS c FROM numbers WHERE channel = 'wa_web'")
   if (!numbers?.c) return
   for (const dir of fs.existsSync(path.join(DATA_DIR, 'auth')) ? fs.readdirSync(path.join(DATA_DIR, 'auth')) : []) {
     const id = Number(dir)
-    if (get('SELECT id FROM numbers WHERE id = ? AND demo = 0', id)) {
+    if (get("SELECT id FROM numbers WHERE id = ? AND demo = 0 AND channel = 'wa_web'", id)) {
       connectNumber(id).catch((err) => logger.error(err))
     }
   }
 }
 
-export async function sendText(numberId: number, jid: string, text: string, userId: number, aiAssisted: boolean) {
+export async function sendText(
+  numberId: number, jid: string, text: string, userId: number | null, aiAssisted: boolean, aiAuto = false,
+) {
   const sock = sockets.get(numberId)
   if (!sock) throw new Error('此號碼未連接')
   const sent = await sock.sendMessage(jid, { text })
   if (!sent?.key.id) throw new Error('發送失敗')
-  sentByTeammate.set(sent.key.id, { userId, aiAssisted })
+  sentByTeammate.set(sent.key.id, { userId, aiAssisted, aiAuto })
   ingest(numberId, sock, sent, true)
   return sent.key.id
 }
@@ -251,7 +253,7 @@ function ingest(numberId: number, sock: WASocket, msg: WAMessage, live: boolean)
 
   const stored = storeMessage({
     numberId, jid, contact: { pn, lid }, waName: msg.pushName ?? undefined, waId: msg.key.id, fromMe,
-    senderId: attribution?.userId ?? null, aiAssisted: attribution?.aiAssisted ?? false,
+    senderId: attribution?.userId ?? null, aiAssisted: attribution?.aiAssisted ?? false, aiAuto: attribution?.aiAuto ?? false,
     type: described.type, body: described.body, ts, live,
   })
   if (attribution) sentByTeammate.delete(msg.key.id)

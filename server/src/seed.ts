@@ -4,7 +4,7 @@
  * Demo login: karen@baton.demo / baton-demo
  */
 import { hashPassword } from './auth.js'
-import { get, run, tx } from './db.js'
+import { get, run, setSetting, tx } from './db.js'
 import { addEvent, storeMessage } from './inbox.js'
 
 if (get<{ c: number }>('SELECT COUNT(*) AS c FROM users')?.c) {
@@ -111,6 +111,20 @@ tx(() => {
 
   addEvent(conversationIds[0], ho, 'handoff', 'Mandy 係熟客，Karen 跟開佢，交俾你啦', karen)
   addEvent(conversationIds[0], karen, 'note', '記得問佢要唔要加購門鐘')
+
+  // What the AI assistant may tell customers.
+  setSetting('business_name', 'Baton 示範店（智能家居）')
+  setSetting('business_intro', '銷售及安裝智能門鎖、門鐘和家居套裝。門市：旺角彌敦道 600 號 12 樓。營業時間：星期一至六 10am–8pm，星期日休息。')
+  setSetting('handoff_message', '收到！我已經通知同事，佢哋會盡快回覆你 🙏')
+  for (const [category, title, body, keywords] of [
+    ['faq', '門市地址及營業時間', '我哋門市喺旺角彌敦道 600 號 12 樓，星期一至六 10am–8pm 營業，星期日休息 😊', '地址, 門市, 營業時間, 幾點開, address'],
+    ['policy', '安裝及送貨', '香港市區免費送貨及安裝，新界及離島另加 $200。落單後 3–5 個工作天內安排上門。', ''],
+    ['policy', '保養及退換', '所有門鎖保養 2 年。收貨 7 日內如有質量問題可免費更換；已安裝的產品不設退款。', ''],
+    ['class', '產品價錢', '智能門鎖（黑色或銀色）$3,280；門鐘套裝 $1,180；家居套裝 $4,500。企業訂購 10 套以上可報價。', ''],
+  ]) {
+    run('INSERT INTO knowledge (category, title, body, keywords) VALUES (?, ?, ?, ?)', category, title, body, keywords)
+  }
+  run("UPDATE numbers SET reply_mode = 'suggest' WHERE id = ?", service)
 })
 
 console.log('Demo data created. Log in with karen@baton.demo / baton-demo')

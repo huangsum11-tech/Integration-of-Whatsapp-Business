@@ -1,5 +1,12 @@
+import { EventEmitter } from 'node:events'
 import { CONTACT_NAME_SQL, CONTACT_PHONE_SQL, all, get, run, tx } from './db.js'
 import { broadcast } from './realtime.js'
+
+/**
+ * Emits 'customer-message' and 'team-message' ({ conversationId, numberId, messageId }) for each
+ * new live message from a customer, or from the team (sent in Baton, from the phone, or by the AI).
+ */
+export const inboxEvents = new EventEmitter()
 
 export type MessageType =
   | 'text' | 'image' | 'video' | 'audio' | 'voice' | 'document' | 'sticker' | 'location' | 'contact' | 'other'
@@ -19,6 +26,8 @@ export interface IncomingMessage {
   mediaMime?: string | null
   ts: number
   aiAssisted?: boolean
+  /** Sent by the AI with no teammate reviewing it. */
+  aiAuto?: boolean
   /** Live messages bump unread counts; history-sync backfill does not. */
   live: boolean
 }
@@ -39,6 +48,8 @@ export interface ContactIds {
   pn?: string
   /** WhatsApp LID, digits only. */
   lid?: string
+  /** Instagram-scoped user ID (Instagram customers have no phone number). */
+  ig?: string
 }
 
 /** "85291234567@s.whatsapp.net" or "1234:5@lid" -> digits only. */
@@ -70,6 +81,7 @@ export function rememberLid(lid: string, pn: string): boolean {
  * told us (phone number, LID, or both), and keep their names up to date.
  */
 export function resolveContact(ids: ContactIds, names: { saved?: string; wa?: string } = {}): number {
+  if (ids.ig) return resolveInstagramContact(ids.ig, names.wa)
   return tx(() => {
     const lid = ids.lid
     const pn = ids.pn ?? (lid ? pnForLid(lid) : undefined)
@@ -93,6 +105,14 @@ export function resolveContact(ids: ContactIds, names: { saved?: string; wa?: st
     if (names.wa) run('UPDATE contacts SET wa_name = ?, updated_at = unixepoch() WHERE id = ? AND wa_name IS NOT ?', names.wa, id, names.wa)
     return id
   })
+}
+
+function resolveInstagramContact(igsid: string, name?: string): number {
+  const key = `ig:${igsid}`
+  const id = get<{ id: number }>('SELECT id FROM contacts WHERE phone = ?', key)?.id
+    ?? Number(run('INSERT INTO contacts (phone) VALUES (?)', key).lastInsertRowid)
+  if (name) run('UPDATE contacts SET wa_name = ?, updated_at = unixepoch() WHERE id = ? AND wa_name IS NOT ?', name, id, name)
+  return id
 }
 
 /** Fold a duplicate contact into the one we keep. Nothing the team wrote is lost. */
@@ -162,10 +182,10 @@ export function storeMessage(m: IncomingMessage): { conversationId: number; mess
     const conversationId = upsertConversation(m.numberId, m.jid, contactId)
     const inserted = run(
       `INSERT OR IGNORE INTO messages
-         (conversation_id, wa_id, from_me, sender_id, type, body, media_path, media_mime, ts, ai_assisted)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (conversation_id, wa_id, from_me, sender_id, type, body, media_path, media_mime, ts, ai_assisted, ai_auto)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       conversationId, m.waId, m.fromMe ? 1 : 0, m.senderId ?? null, m.type, m.body,
-      m.mediaPath ?? null, m.mediaMime ?? null, m.ts, m.aiAssisted ? 1 : 0,
+      m.mediaPath ?? null, m.mediaMime ?? null, m.ts, m.aiAssisted || m.aiAuto ? 1 : 0, m.aiAuto ? 1 : 0,
     )
     if (inserted.changes === 0) return null
     const messageId = Number(inserted.lastInsertRowid)
@@ -183,6 +203,7 @@ export function storeMessage(m: IncomingMessage): { conversationId: number; mess
   if (result && m.live) {
     broadcast('message', getMessage(result.messageId))
     broadcast('conversation', getConversation(result.conversationId))
+    inboxEvents.emit(m.fromMe ? 'team-message' : 'customer-message', { ...result, numberId: m.numberId })
   }
   return result
 }
@@ -198,9 +219,9 @@ export function setMessageMedia(numberId: number, waId: string, mediaPath: strin
 
 const CONVERSATION_SELECT = `
   SELECT c.id, c.number_id, c.contact_id, c.jid, c.assignee_id, c.status, c.unread,
-         c.last_message_at, c.last_preview,
+         c.last_message_at, c.last_preview, c.ai_paused, c.ai_suggestion,
          ${CONTACT_PHONE_SQL} AS phone, ${CONTACT_NAME_SQL} AS contact_name,
-         n.label AS number_label, n.phone AS number_phone
+         n.label AS number_label, n.phone AS number_phone, n.channel, n.reply_mode
   FROM conversations c
   JOIN contacts ct ON ct.id = c.contact_id
   JOIN numbers n ON n.id = c.number_id`
