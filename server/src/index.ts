@@ -14,8 +14,10 @@ import { setIo } from './realtime.js'
 import './autoreply.js'
 import { startAutomation } from './automation.js'
 import { startCampaignScheduler } from './campaigns.js'
-import './igcomments.js'
+import './comments.js'
 import './transcribe.js'
+import { startThreadsPolling } from './threads.js'
+import { startTokenRefresh } from './tokens.js'
 import { startPayrollScheduler } from './payroll.js'
 import { api, media, webhooks } from './routes.js'
 import { restoreAll } from './whatsapp.js'
@@ -90,4 +92,6 @@ server.listen(PORT, async () => {
   startPayrollScheduler()
   startAutomation()
   startCampaignScheduler()
+  startThreadsPolling()
+  startTokenRefresh()
 })

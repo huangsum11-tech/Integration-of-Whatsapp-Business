@@ -1,0 +1,15 @@
+# docker compose up -d   →  http://localhost:4000
+# Put your settings in .env (copy .env.example). All data stays in the baton-data volume.
+services:
+  baton:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    env_file: .env
+    environment:
+      BATON_DATA_DIR: /data
+    volumes:
+      - baton-data:/data
+volumes:
+  baton-data:

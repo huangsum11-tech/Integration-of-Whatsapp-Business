@@ -1,23 +1,25 @@
 /**
- * Official Meta APIs: the WhatsApp Business Cloud API and the Instagram Messaging API
- * (Instagram API with Instagram Login). Both deliver customer messages to one webhook,
- * /webhooks/meta, and send replies with an access token stored on the number.
+ * Official Meta APIs: the WhatsApp Business Cloud API, the Instagram Messaging API
+ * (Instagram API with Instagram Login) and the Messenger Platform (Facebook Page). All
+ * deliver customer messages to one webhook, /webhooks/meta, and send replies with an
+ * access token stored on the number. (Threads has no messaging API; see threads.ts.)
  */
 import crypto from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import path from 'node:path'
-import { get, run } from './db.js'
+import { get, run, setSetting } from './db.js'
 import { setMessageMedia, storeMessage, type MessageType } from './inbox.js'
 import { broadcast } from './realtime.js'
 import { MEDIA_DIR } from './whatsapp.js'
 
-const VERSION = process.env.META_GRAPH_VERSION ?? 'v23.0'
+const VERSION = process.env.META_GRAPH_VERSION ?? 'v25.0'
 const FB = `https://graph.facebook.com/${VERSION}`
 const IG = `https://graph.instagram.com/${VERSION}`
 
 export interface CloudConfig { phoneNumberId: string; accessToken: string }
 export interface InstagramConfig { igUserId: string; accessToken: string; username?: string }
+export interface MessengerConfig { pageId: string; accessToken: string; name?: string }
 
 export function numberConfig<T>(numberId: number): T {
   const row = get<{ config: string }>('SELECT config FROM numbers WHERE id = ?', numberId)
@@ -53,6 +55,29 @@ export async function verifyInstagram(accessToken: string) {
   return { igUserId: String(igUserId), username: me.username ?? '' }
 }
 
+/** Check a Facebook Page access token and return the Page's name. */
+export async function verifyMessenger(pageId: string, accessToken: string) {
+  const page = await graph<{ id?: string; name?: string }>(`${FB}/${encodeURIComponent(pageId)}?fields=id,name`, accessToken)
+  if (!page.id) throw new Error('未能讀取 Facebook 專頁')
+  return { pageId: String(page.id), name: page.name ?? '' }
+}
+
+/**
+ * Ask Meta to send this Page's / Instagram account's events to our app's webhook.
+ * Best effort: it needs the right permissions, and can also be done in the App dashboard.
+ */
+export async function subscribeWebhooks(channel: string, config: Record<string, string>) {
+  if (channel === 'messenger') {
+    await graph(`${FB}/${encodeURIComponent(config.pageId)}/subscribed_apps`, config.accessToken, {
+      method: 'POST', body: { subscribed_fields: 'messages,message_echoes,messaging_postbacks,feed' },
+    })
+  } else if (channel === 'instagram') {
+    await graph(`${IG}/${encodeURIComponent(config.igUserId)}/subscribed_apps`, config.accessToken, {
+      method: 'POST', body: { subscribed_fields: 'messages,comments' },
+    })
+  }
+}
+
 // ---------- Sending ----------
 
 /**
@@ -76,6 +101,17 @@ export async function sendCloudText(numberId: number, conversationId: number, ji
   const id = data.messages?.[0]?.id
   if (!id) throw new Error('發送失敗')
   return id
+}
+
+export async function sendMessengerText(numberId: number, conversationId: number, jid: string, text: string) {
+  assertServiceWindow(conversationId)
+  const config = numberConfig<MessengerConfig>(numberId)
+  const data = await graph<{ message_id?: string }>(`${FB}/${encodeURIComponent(config.pageId)}/messages`, config.accessToken, {
+    method: 'POST',
+    body: { recipient: { id: jid.split('@')[0] }, messaging_type: 'RESPONSE', message: { text } },
+  })
+  if (!data.message_id) throw new Error('發送失敗')
+  return data.message_id
 }
 
 export interface TemplateMessage { name: string; language: string; params: string[] }
@@ -127,6 +163,20 @@ export async function sendInstagramPrivateReply(numberId: number, commentId: str
   })
 }
 
+/** Facebook: a private message to the person who commented on the Page's post (once, within 7 days). */
+export async function sendFacebookPrivateReply(numberId: number, commentId: string, text: string) {
+  const config = numberConfig<MessengerConfig>(numberId)
+  return graph<{ recipient_id?: string; message_id?: string }>(`${FB}/${encodeURIComponent(config.pageId)}/messages`, config.accessToken, {
+    method: 'POST',
+    body: { recipient: { comment_id: commentId }, message: { text } },
+  })
+}
+
+export async function replyToFacebookComment(numberId: number, commentId: string, text: string) {
+  const config = numberConfig<MessengerConfig>(numberId)
+  return graph(`${FB}/${encodeURIComponent(commentId)}/comments`, config.accessToken, { method: 'POST', body: { message: text } })
+}
+
 /** A public answer under the comment, e.g. "已私訊你 😊". */
 export async function replyToInstagramComment(numberId: number, commentId: string, text: string) {
   const config = numberConfig<InstagramConfig>(numberId)
@@ -135,7 +185,10 @@ export async function replyToInstagramComment(numberId: number, commentId: strin
 
 // ---------- Webhook ----------
 
-/** Emits 'instagram-comment' ({ numberId, igUserId, comment }) for each new comment on the business's posts. */
+/**
+ * Emits 'comment' ({ platform: 'instagram' | 'facebook', numberId, ownId, comment }) for each
+ * new comment on the business's posts.
+ */
 export const metaEvents = new EventEmitter()
 
 /** Meta signs each delivery with the app secret; reject anything that doesn't match. */
@@ -150,7 +203,7 @@ export function validSignature(rawBody: Buffer | undefined, header: string | und
   })
 }
 
-function numberFor(channel: 'wa_cloud' | 'instagram', key: 'phoneNumberId' | 'igUserId', value: string) {
+function numberFor(channel: 'wa_cloud' | 'instagram' | 'messenger', key: 'phoneNumberId' | 'igUserId' | 'pageId', value: string) {
   return get<{ id: number }>(
     `SELECT id FROM numbers WHERE channel = ? AND status = 'connected' AND json_extract(config, '$.${key}') = ?`, channel, value,
   )?.id
@@ -199,6 +252,8 @@ const IG_ATTACHMENT: Record<string, MessageType> = { image: 'image', video: 'vid
 
 /** Store every message a webhook delivery contains. Media downloads finish in the background. */
 export function handleWebhook(payload: any) {
+  // Shown on the setup checklist, so the team can see Meta is reaching the server.
+  if (typeof payload?.object === 'string') setSetting(`webhook_last_${payload.object}`, String(Math.floor(Date.now() / 1000)))
   if (payload?.object === 'whatsapp_business_account') {
     for (const entry of payload.entry ?? []) {
       for (const change of entry.changes ?? []) {
@@ -234,29 +289,54 @@ export function handleWebhook(payload: any) {
       const numberId = numberFor('instagram', 'igUserId', String(entry.id ?? ''))
       if (!numberId) continue
       for (const change of entry.changes ?? []) {
-        if (change.field === 'comments' && change.value?.id) metaEvents.emit('instagram-comment', { numberId, igUserId: String(entry.id), comment: change.value })
-      }
-      for (const event of (entry.messaging ?? []) as InstagramEvent[]) {
-        const m = event.message
-        if (!m?.mid || m.is_deleted) continue
-        // Echoes are the business's own messages, including ones sent from the Instagram app.
-        const fromMe = Boolean(m.is_echo)
-        const customer = fromMe ? event.recipient.id : event.sender.id
-        const attachment = m.attachments?.[0]
-        const type: MessageType = m.text ? 'text' : attachment ? IG_ATTACHMENT[attachment.type] ?? 'other' : 'other'
-        const stored = storeMessage({
-          numberId, jid: `${customer}@instagram`, contact: { ig: customer }, waId: m.mid, fromMe,
-          type, body: m.text ?? '', ts: Math.floor(event.timestamp / 1000), live: true,
-        })
-        if (!stored) continue
-        if (attachment?.payload?.url && IG_ATTACHMENT[attachment.type]) {
-          saveMedia(numberId, m.mid, attachment.payload.url).catch((err) => console.warn('Instagram media download failed', err))
+        if (change.field === 'comments' && change.value?.id) {
+          metaEvents.emit('comment', { platform: 'instagram', numberId, ownId: String(entry.id), comment: change.value })
         }
-        fillInstagramName(numberId, customer).catch(() => {
-          // Profile lookups need the customer to have messaged first; their messages are still stored.
-        })
       }
+      storeMessagingEvents('instagram', numberId, entry.messaging ?? [])
     }
+  }
+
+  if (payload?.object === 'page') {
+    for (const entry of payload.entry ?? []) {
+      const numberId = numberFor('messenger', 'pageId', String(entry.id ?? ''))
+      if (!numberId) continue
+      for (const change of entry.changes ?? []) {
+        const v = change.value ?? {}
+        if (change.field === 'feed' && v.item === 'comment' && v.verb === 'add' && v.comment_id) {
+          metaEvents.emit('comment', {
+            platform: 'facebook', numberId, ownId: String(entry.id),
+            comment: { id: v.comment_id, text: v.message ?? '', from: { id: v.from?.id, username: v.from?.name } },
+          })
+        }
+      }
+      storeMessagingEvents('messenger', numberId, entry.messaging ?? [])
+    }
+  }
+}
+
+/** Instagram and Messenger deliver direct messages in the same shape. */
+function storeMessagingEvents(channel: 'instagram' | 'messenger', numberId: number, events: InstagramEvent[]) {
+  for (const event of events) {
+    const m = event.message
+    if (!m?.mid || m.is_deleted) continue
+    // Echoes are the business's own messages, including ones sent from the Instagram / Messenger app.
+    const fromMe = Boolean(m.is_echo)
+    const customer = fromMe ? event.recipient.id : event.sender.id
+    const attachment = m.attachments?.[0]
+    const type: MessageType = m.text ? 'text' : attachment ? IG_ATTACHMENT[attachment.type] ?? 'other' : 'other'
+    const domain = channel === 'instagram' ? 'instagram' : 'messenger'
+    const stored = storeMessage({
+      numberId, jid: `${customer}@${domain}`, contact: channel === 'instagram' ? { ig: customer } : { fb: customer }, waId: m.mid, fromMe,
+      type, body: m.text ?? '', ts: Math.floor(event.timestamp / 1000), live: true,
+    })
+    if (!stored) continue
+    if (attachment?.payload?.url && IG_ATTACHMENT[attachment.type]) {
+      saveMedia(numberId, m.mid, attachment.payload.url).catch((err) => console.warn(`${channel} media download failed`, err))
+    }
+    fillName(channel, numberId, customer).catch(() => {
+      // Profile lookups need the customer to have messaged first; their messages are still stored.
+    })
   }
 }
 
@@ -279,12 +359,14 @@ async function saveMedia(numberId: number, waId: string, url: string, token?: st
   broadcast('media', { waId, mediaPath: rel, mime })
 }
 
-/** Instagram webhooks carry only an ID; look up the customer's name and username once. */
-async function fillInstagramName(numberId: number, igsid: string) {
-  const contact = get<{ id: number; wa_name: string | null }>('SELECT id, wa_name FROM contacts WHERE phone = ?', `ig:${igsid}`)
+/** Instagram and Messenger webhooks carry only an ID; look up the customer's name once. */
+async function fillName(channel: 'instagram' | 'messenger', numberId: number, id: string) {
+  const contact = get<{ id: number; wa_name: string | null }>('SELECT id, wa_name FROM contacts WHERE phone = ?', `${channel === 'instagram' ? 'ig' : 'fb'}:${id}`)
   if (!contact || contact.wa_name) return
-  const { accessToken } = numberConfig<InstagramConfig>(numberId)
-  const profile = await graph<{ name?: string; username?: string }>(`${IG}/${encodeURIComponent(igsid)}?fields=name,username`, accessToken)
+  const { accessToken } = numberConfig<{ accessToken: string }>(numberId)
+  const profile = channel === 'instagram'
+    ? await graph<{ name?: string; username?: string }>(`${IG}/${encodeURIComponent(id)}?fields=name,username`, accessToken)
+    : await graph<{ name?: string; username?: string }>(`${FB}/${encodeURIComponent(id)}?fields=name`, accessToken)
   const name = profile.name && profile.username ? `${profile.name} (@${profile.username})` : profile.name ?? (profile.username && `@${profile.username}`)
   if (!name) return
   run('UPDATE contacts SET wa_name = ?, updated_at = unixepoch() WHERE id = ?', name, contact.id)

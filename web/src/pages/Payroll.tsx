@@ -296,7 +296,7 @@ function SettingsCard({ data, onSaved }: { data: Overview; onSaved: () => void }
   const [form, setForm] = useState(data.settings)
   const [saved, setSaved] = useState(false)
   useEffect(() => setForm(data.settings), [data.settings])
-  const senders = numbers.filter((n) => n.channel !== 'instagram')
+  const senders = numbers.filter((n) => n.channel.startsWith('wa_'))
   const sender = numbers.find((n) => n.id === form.number_id)
   const save = async () => {
     await api('/payroll/settings', { method: 'PUT', body: form })

@@ -7,7 +7,7 @@ import {
   SESSION_COOKIE, createSession, hashPassword, requireAdmin, requireUser, verifyPassword,
 } from './auth.js'
 import { canSend, sendReply, sendToPhone } from './channels.js'
-import { CONTACT_NAME_SQL, CONTACT_PHONE_SQL, all, get, getSetting, run, setSetting, tx } from './db.js'
+import { CONTACT_NAME_SQL, CONTACT_PHONE_SQL, SOCIAL_SQL, all, get, getSetting, run, setSetting, tx } from './db.js'
 import { INSTRUCTOR_CHAT_SQL, addEvent, getConversation, getTimeline, listConversations } from './inbox.js'
 import { TEMPLATE_PATH, exportCsv, importCsv, importTemplate } from './knowledge.js'
 import { PROVIDERS, currentAi, hasKey, type Provider } from './llm.js'
@@ -24,7 +24,9 @@ import { canTranscribe } from './transcribe.js'
 import {
   SEGMENTS, allTags, audienceContacts, getCampaign, importContacts, listCampaigns, saveCampaign, sendCampaign, sendTest, setTags, tagsFor,
 } from './campaigns.js'
-import { handleWebhook, validSignature, verifyCloud, verifyInstagram } from './meta.js'
+import { handleWebhook, subscribeWebhooks, validSignature, verifyCloud, verifyInstagram, verifyMessenger } from './meta.js'
+import { verifyThreads } from './threads.js'
+import { setupStatus } from './setup.js'
 import { broadcast } from './realtime.js'
 import { MEDIA_DIR, connectNumber, currentQr, disconnectNumber, isConnected, syncContacts } from './whatsapp.js'
 
@@ -157,6 +159,11 @@ const newNumber = z.discriminatedUnion('channel', [
     phoneNumberId: z.string().regex(/^\d+$/, '電話號碼 ID 只包含數字'), accessToken: z.string().min(20),
   }),
   z.object({ channel: z.literal('instagram'), label: z.string().min(1).max(60), accessToken: z.string().min(20) }),
+  z.object({
+    channel: z.literal('messenger'), label: z.string().min(1).max(60),
+    pageId: z.string().regex(/^\d+$/, '專頁 ID 只包含數字'), accessToken: z.string().min(20),
+  }),
+  z.object({ channel: z.literal('threads'), label: z.string().min(1).max(60), accessToken: z.string().min(20) }),
 ])
 
 /** Check official API credentials with Meta before saving them. */
@@ -169,7 +176,18 @@ async function officialConfig(b: z.infer<typeof newNumber>) {
     const info = await verifyInstagram(b.accessToken)
     return {
       phone: info.username ? `@${info.username}` : null, key: 'igUserId', id: info.igUserId,
-      config: { igUserId: info.igUserId, username: info.username, accessToken: b.accessToken },
+      config: { igUserId: info.igUserId, username: info.username, accessToken: b.accessToken, refreshedAt: Math.floor(Date.now() / 1000) },
+    }
+  }
+  if (b.channel === 'messenger') {
+    const info = await verifyMessenger(b.pageId, b.accessToken)
+    return { phone: info.name || null, key: 'pageId', id: info.pageId, config: { pageId: info.pageId, name: info.name, accessToken: b.accessToken } }
+  }
+  if (b.channel === 'threads') {
+    const info = await verifyThreads(b.accessToken)
+    return {
+      phone: info.username ? `@${info.username}` : null, key: 'userId', id: info.userId,
+      config: { userId: info.userId, username: info.username, accessToken: b.accessToken, refreshedAt: Math.floor(Date.now() / 1000) },
     }
   }
   throw new Error('不支援的連接方式')
@@ -189,6 +207,13 @@ api.post('/numbers', requireAdmin, async (req, res) => {
   } catch (err) {
     return res.status(400).json({ error: err instanceof Error ? err.message : '未能驗證連接資料' })
   }
+  // Point the Page / Instagram account's events at this app. If it fails, the dashboard can do it.
+  let warning: string | undefined
+  try {
+    await subscribeWebhooks(b.channel, official.config as unknown as Record<string, string>)
+  } catch (err) {
+    warning = `已連接，但未能自動訂閱 webhook（${err instanceof Error ? err.message : ''}）。請在 Meta App 的 Webhooks 設定手動訂閱。`
+  }
   const existing = get<{ id: number }>(
     `SELECT id FROM numbers WHERE channel = ? AND json_extract(config, '$.${official.key}') = ?`, b.channel, official.id,
   )
@@ -196,11 +221,11 @@ api.post('/numbers', requireAdmin, async (req, res) => {
     // Reconnecting the same account (e.g. with a new token) keeps its conversations.
     run("UPDATE numbers SET label = ?, phone = ?, config = ?, status = 'connected' WHERE id = ?", b.label, official.phone, JSON.stringify(official.config), existing.id)
     broadcast('number', { id: existing.id, status: 'connected' })
-    return res.json({ id: existing.id })
+    return res.json({ id: existing.id, warning })
   }
   const id = Number(run("INSERT INTO numbers (label, phone, channel, config, status) VALUES (?, ?, ?, ?, 'connected')",
     b.label, official.phone, b.channel, JSON.stringify(official.config)).lastInsertRowid)
-  res.json({ id })
+  res.json({ id, warning })
 })
 
 api.patch('/numbers/:id', requireAdmin, (req, res) => {
@@ -245,6 +270,8 @@ api.post('/numbers/:id/sync-contacts', requireAdmin, async (req, res) => {
   if (!isConnected(id)) return res.status(409).json({ error: '此號碼未連接（只適用於 QR Code 連接的號碼）' })
   res.json(await syncContacts(id, undefined, true))
 })
+
+api.get('/setup-status', (_req, res) => res.json(setupStatus()))
 
 // ---------- Inbox ----------
 
@@ -883,7 +910,7 @@ api.delete('/payroll/runs/:id', requireAdmin, (req, res) => {
 
 /** Contact columns with phone hidden (NULL) while WhatsApp only gave us a LID. */
 const CONTACT_COLUMNS = `ct.id, ${CONTACT_PHONE_SQL} AS phone, ct.lid, ct.name, ct.saved_name, ct.wa_name, ct.notes,
-  ct.owner_id, ct.created_at, ct.updated_at, ct.phone LIKE 'ig:%' AS instagram`
+  ct.owner_id, ct.created_at, ct.updated_at, ${SOCIAL_SQL} AS social`
 
 function getContact(id: number) {
   return get(`SELECT ${CONTACT_COLUMNS} FROM contacts ct WHERE ct.id = ?`, id)

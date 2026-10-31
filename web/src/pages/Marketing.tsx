@@ -33,11 +33,11 @@ export default function Marketing() {
       <div className="page-head">
         <div>
           <h1>推廣</h1>
-          <p>WhatsApp 群發優惠及消息、Instagram 留言自動私訊、客人分組。</p>
+          <p>WhatsApp 群發優惠及消息、Instagram／Facebook 留言自動私訊、客人分組。</p>
         </div>
       </div>
       <div className="tabs" role="tablist" style={{ maxWidth: 480, marginBottom: 20 }}>
-        {([['broadcast', 'WhatsApp 群發'], ['instagram', 'IG 留言自動私訊'], ['customers', '客人名單']] as const).map(([id, label]) => (
+        {([['broadcast', 'WhatsApp 群發'], ['instagram', 'IG／FB 留言自動私訊'], ['customers', '客人名單']] as const).map(([id, label]) => (
           <button key={id} role="tab" aria-selected={tab === id} className={`tab ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>{label}</button>
         ))}
       </div>
@@ -91,7 +91,7 @@ function Broadcasts() {
             <li><b>建議用官方 Cloud API 號碼</b>，並在 Meta 建立「Marketing」類別的模板。Cloud API 主動發訊息一定要用已審批模板。</li>
             <li><b>QR 連接的號碼群發有封號風險</b>。Baton 會逐條慢慢發（每條相隔約 10 秒），但仍建議只發給少量熟客，不要用主要生意號碼大量發送。</li>
             <li>只發給同意接收消息的客人；頻密群發容易被客人封鎖或檢舉。</li>
-            <li>Instagram 不容許群發私訊，可以用「IG 留言自動私訊」。</li>
+            <li>Instagram／Facebook 不容許群發私訊，可以用「IG／FB 留言自動私訊」。</li>
             <li>填寫「AI 需要知道的優惠內容」，客人回覆查詢時 AI 可以直接解答。</li>
           </ul>
         </section>
@@ -171,7 +171,7 @@ function CampaignEditor({ id, overview, onClose, onSaved }: { id: number | null;
             <label className="label">發送號碼</label>
             <select className="select" value={form.number_id ?? ''} onChange={(e) => setForm({ ...form, number_id: e.target.value ? Number(e.target.value) : null })}>
               <option value="">請選擇</option>
-              {numbers.filter((n) => n.channel !== 'instagram').map((n) => <option key={n.id} value={n.id}>{n.label}{n.channel === 'wa_web' && !n.demo ? '（QR，有封號風險）' : ''}{n.demo ? '（示範）' : ''}</option>)}
+              {numbers.filter((n) => n.channel.startsWith('wa_')).map((n) => <option key={n.id} value={n.id}>{n.label}{n.channel === 'wa_web' && !n.demo ? '（QR，有封號風險）' : ''}{n.demo ? '（示範）' : ''}</option>)}
             </select>
           </div>
         </div>
@@ -295,7 +295,7 @@ function InstagramRules() {
     socket.on('ig-comment', load)
     return () => { socket.off('ig-comment', load) }
   }, [load])
-  const igNumbers = numbers.filter((n) => n.channel === 'instagram')
+  const igNumbers = numbers.filter((n) => n.channel === 'instagram' || n.channel === 'messenger')
   const save = async () => {
     setError('')
     try {
@@ -315,9 +315,9 @@ function InstagramRules() {
             <button className="btn sm primary" onClick={() => setEditing({ keywords: '', reply: '', public_reply: '已私訊你 😊', active: 1 })}><Icon name="plus" size={14} />新增規則</button>
           </div>
           <p className="muted" style={{ margin: '0 0 10px', fontSize: 13 }}>
-            例如帖子寫「留言 PILATES 取得試堂優惠」，客人一留言就自動收到私訊。客人回覆私訊後，會進入收件匣由 AI／同事跟進。
+            例如 IG 或 Facebook 帖子寫「留言 PILATES 取得試堂優惠」，客人一留言就自動收到私訊。客人回覆私訊後，會進入收件匣由 AI／同事跟進。
           </p>
-          {igNumbers.length === 0 && <div className="error" style={{ marginBottom: 8 }}>未連接 Instagram 帳戶：請先到「號碼」頁連接。</div>}
+          {igNumbers.length === 0 && <div className="error" style={{ marginBottom: 8 }}>未連接 Instagram 或 Facebook 專頁：請先到「號碼」頁連接。</div>}
           <div className="kb-list">
             {data.rules.length === 0 && <div className="faint" style={{ fontSize: 13 }}>未有規則</div>}
             {data.rules.map((r) => (
@@ -356,7 +356,7 @@ function InstagramRules() {
         <Modal title={editing.id ? '編輯規則' : '新增規則'} onClose={() => setEditing(null)}>
           {igNumbers.length > 1 && (
             <div>
-              <label className="label">Instagram 帳戶</label>
+              <label className="label">帳戶</label>
               <select className="select" value={editing.number_id ?? ''} onChange={(e) => setEditing({ ...editing, number_id: e.target.value ? Number(e.target.value) : null })}>
                 <option value="">所有帳戶</option>
                 {igNumbers.map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}

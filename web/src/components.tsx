@@ -28,6 +28,8 @@ const PATHS: Record<string, ReactNode> = {
   bot: <><rect x="4" y="8" width="16" height="12" rx="3" /><path d="M12 8V4M9 14h.01M15 14h.01" /></>,
   pause: <><path d="M9 5v14M15 5v14" /></>,
   play: <path d="M7 4l13 8-13 8z" />,
+  facebook: <><rect x="3" y="3" width="18" height="18" rx="4" /><path d="M15 8h-2a2 2 0 0 0-2 2v11M9 13h5" /></>,
+  threads: <><path d="M16.5 11.5c-.5-3-2.5-4.5-5-4.5-3 0-5 2.4-5 5.5S8.5 18 12 18c3 0 5-1.8 5-4.2 0-2.3-2-3.3-4.5-3.3-2 0-3.3 1-3.3 2.3 0 1.2 1 2 2.4 2 2 0 3.2-1.6 3.2-4.3" /></>,
   megaphone: <><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z" /><path d="M15 9a3 3 0 0 1 0 6" /><path d="M18 6a7 7 0 0 1 0 12" /></>,
   wallet: <><rect x="3" y="6" width="18" height="14" rx="2" /><path d="M3 10h18M16 15h2" /><path d="M6 6V4h12v2" /></>,
   book: <><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z" /><path d="M4 19.5V21h16" /></>,

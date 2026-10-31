@@ -150,7 +150,7 @@ function Auth({ setup, onDone }: { setup: boolean; onDone: () => void }) {
     ['inbox', '整個團隊在同一處回覆，對話可以交接'],
     ['archive', '訊息、相片、語音與文件自動備份'],
     ['sparkle', 'AI 根據公司知識庫回答客人，不確定就轉交同事'],
-    ['instagram', 'WhatsApp 與 Instagram 私訊集中一處'],
+    ['instagram', 'WhatsApp、Instagram、Facebook、Threads 集中一處'],
     ['shield', '同事離職時，客戶關係留在公司'],
   ]
 

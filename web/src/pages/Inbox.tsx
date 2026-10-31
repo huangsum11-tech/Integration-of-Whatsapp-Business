@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { api, type Contact, type Conversation, type Deal, type InboxEvent, type Message, type QuickReply, type Trial } from '../api'
+import { CHANNEL_LABEL, api, type Contact, type Conversation, type Deal, type InboxEvent, type Message, type QuickReply, type Trial } from '../api'
 import { useApp } from '../App'
 import { Avatar, Icon, Modal } from '../components'
 import { clock, dayLabel, formatPhone, money, timeLabel } from '../format'
@@ -233,7 +233,7 @@ function Thread({ detail }: { detail: Detail }) {
         <Avatar name={conversation.contact_name} size={40} />
         <div className="who">
           <b>{conversation.contact_name}</b>
-          <div className="muted" style={{ fontSize: 12 }}>{conversation.channel === 'instagram' ? 'Instagram' : formatPhone(conversation.phone) || '號碼未同步'} · 經 <b style={{ fontWeight: 500 }}>{conversation.number_label}</b></div>
+          <div className="muted" style={{ fontSize: 12 }}>{conversation.channel.startsWith('wa_') ? formatPhone(conversation.phone) || '號碼未同步' : CHANNEL_LABEL[conversation.channel]} · 經 <b style={{ fontWeight: 500 }}>{conversation.number_label}</b></div>
         </div>
         {conversation.reply_mode === 'auto' && (
           <button className={`btn sm ${conversation.ai_paused ? '' : 'ai'}`} onClick={toggleAi}
@@ -256,7 +256,7 @@ function Thread({ detail }: { detail: Detail }) {
       {conversation.needs_human ? (
         <div className="human-banner">
           <Icon name="handoff" size={15} />
-          AI 已把這位客人轉交同事。請在下面「回覆客戶」直接回覆，訊息會經 {conversation.channel === 'instagram' ? 'Instagram' : 'WhatsApp'} 發給客人。
+          AI 已把這位客人轉交同事。請在下面「回覆客戶」直接回覆，訊息會經 {CHANNEL_LABEL[conversation.channel]} 發給客人{conversation.channel === 'threads' ? '（公開回覆在客人留言下面）' : ''}。
         </div>
       ) : null}
       <div className="thread-body" ref={bodyRef}>
@@ -461,10 +461,10 @@ function SidePanel({ detail, reload }: { detail: Detail; reload: () => void }) {
         <input className="input" style={{ textAlign: 'center', fontWeight: 700, fontSize: 16, border: '1px solid transparent' }}
           value={name} placeholder={contact.saved_name ?? contact.wa_name ?? '加入名稱'} onChange={(e) => setName(e.target.value)}
           onBlur={() => name !== (contact.name ?? '') && saveContact({ name: name || null })} aria-label="客戶名稱" />
-        <span className="muted">{contact.instagram ? 'Instagram 用戶' : formatPhone(contact.phone) || '號碼未同步'}</span>
+        <span className="muted">{contact.social ? `${contact.social} 用戶` : formatPhone(contact.phone) || '號碼未同步'}</span>
         {contact.saved_name && contact.name && contact.saved_name !== contact.name && <span className="faint" style={{ fontSize: 12 }}>手機通訊錄：{contact.saved_name}</span>}
-        {contact.wa_name && contact.wa_name !== (contact.name ?? contact.saved_name) && <span className="faint" style={{ fontSize: 12 }}>{contact.instagram ? 'Instagram' : 'WhatsApp'} 名稱：{contact.wa_name}</span>}
-        {!contact.phone && !contact.instagram && <span className="faint" style={{ fontSize: 12, maxWidth: 240 }}>WhatsApp 暫時隱藏了此客戶的電話號碼，同步後會自動補上</span>}
+        {contact.wa_name && contact.wa_name !== (contact.name ?? contact.saved_name) && <span className="faint" style={{ fontSize: 12 }}>{contact.social ?? 'WhatsApp'} 名稱：{contact.wa_name}</span>}
+        {!contact.phone && !contact.social && <span className="faint" style={{ fontSize: 12, maxWidth: 240 }}>WhatsApp 暫時隱藏了此客戶的電話號碼，同步後會自動補上</span>}
       </div>
 
       <div className="side-section">

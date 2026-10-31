@@ -5,7 +5,7 @@
  * its details are added to what the AI knows, so it can answer customers' replies.
  */
 import { normalizePhone, sendToPhone } from './channels.js'
-import { CONTACT_NAME_SQL, all, get, run, tx } from './db.js'
+import { CONTACT_NAME_SQL, SOCIAL_SQL, all, get, run, tx } from './db.js'
 import { parseCsv } from './knowledge.js'
 import { broadcast } from './realtime.js'
 
@@ -41,7 +41,7 @@ export function audienceContacts(a: Audience) {
        SELECT ct.id, ${CONTACT_NAME_SQL} AS name, ct.phone, ct.created_at,
          (SELECT MAX(c.last_message_at) FROM conversations c WHERE c.contact_id = ct.id) AS last_at
        FROM contacts ct
-       WHERE ct.phone NOT LIKE 'ig:%' AND (ct.lid IS NULL OR ct.phone != ct.lid)
+       WHERE (${SOCIAL_SQL}) IS NULL AND (ct.lid IS NULL OR ct.phone != ct.lid)
          AND ct.phone NOT IN (SELECT phone FROM instructors WHERE phone != '')
          AND ct.phone NOT IN (SELECT phone FROM users WHERE phone != '')
      ) ct

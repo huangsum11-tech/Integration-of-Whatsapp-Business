@@ -198,7 +198,7 @@ function SettingsCard({ data, isAdmin, onSaved }: { data: Overview; isAdmin: boo
         <fieldset className="form-stack" disabled={!isAdmin}>
           <select className="select" value={form.notify_number_id ?? ''} onChange={(e) => set('notify_number_id', e.target.value ? Number(e.target.value) : null)} aria-label="通知用號碼">
             <option value="">請選擇（未選擇就不會發提醒）</option>
-            {numbers.filter((n) => n.channel !== 'instagram').map((n) => <option key={n.id} value={n.id}>{n.label}{n.demo ? '（示範）' : ''}</option>)}
+            {numbers.filter((n) => n.channel.startsWith('wa_')).map((n) => <option key={n.id} value={n.id}>{n.label}{n.demo ? '（示範）' : ''}</option>)}
           </select>
           <div className="faint" style={{ fontSize: 12 }}>
             用來發提醒給同事。{sender?.channel === 'wa_cloud' ? '官方 Cloud API 號碼只能在同事 24 小時內傳過訊息給它時發出提醒，建議用 QR 連接的號碼。' : ''}

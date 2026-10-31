@@ -52,6 +52,10 @@ export interface ContactIds {
   lid?: string
   /** Instagram-scoped user ID (Instagram customers have no phone number). */
   ig?: string
+  /** Facebook Page-scoped user ID (Messenger). */
+  fb?: string
+  /** Threads username. */
+  th?: string
 }
 
 /** "85291234567@s.whatsapp.net" or "1234:5@lid" -> digits only. */
@@ -83,7 +87,9 @@ export function rememberLid(lid: string, pn: string): boolean {
  * told us (phone number, LID, or both), and keep their names up to date.
  */
 export function resolveContact(ids: ContactIds, names: { saved?: string; wa?: string } = {}): number {
-  if (ids.ig) return resolveInstagramContact(ids.ig, names.wa)
+  if (ids.ig) return resolveSocialContact(`ig:${ids.ig}`, names.wa)
+  if (ids.fb) return resolveSocialContact(`fb:${ids.fb}`, names.wa)
+  if (ids.th) return resolveSocialContact(`th:${ids.th}`, names.wa)
   return tx(() => {
     const lid = ids.lid
     const pn = ids.pn ?? (lid ? pnForLid(lid) : undefined)
@@ -109,8 +115,8 @@ export function resolveContact(ids: ContactIds, names: { saved?: string; wa?: st
   })
 }
 
-function resolveInstagramContact(igsid: string, name?: string): number {
-  const key = `ig:${igsid}`
+/** Social-media customers have no phone number; their contact is keyed by "ig:…", "fb:…" or "th:…". */
+function resolveSocialContact(key: string, name?: string): number {
   const id = get<{ id: number }>('SELECT id FROM contacts WHERE phone = ?', key)?.id
     ?? Number(run('INSERT INTO contacts (phone) VALUES (?)', key).lastInsertRowid)
   if (name) run('UPDATE contacts SET wa_name = ?, updated_at = unixepoch() WHERE id = ? AND wa_name IS NOT ?', name, id, name)

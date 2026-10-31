@@ -379,3 +379,12 @@ fieldset.form-stack { border: 0; margin: 0; padding: 0; min-width: 0; }
 .stat-row b { font-size: 20px; font-family: var(--font-display); }
 .stat-row span { font-size: 12px; color: var(--muted); }
 .input.price { display: inline-block; width: 70px; padding: 1px 6px; margin: 0 2px; }
+
+/* ---------- Setup checklist ---------- */
+.setup-card { margin-bottom: 20px; }
+.checklist { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.check { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); text-decoration: none; color: var(--text); font-size: 13px; }
+.check:hover { border-color: var(--pine); }
+.check .mark { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; flex-shrink: 0; margin-top: 1px; }
+.check.ok .mark { background: var(--pine); border-color: var(--pine); color: #fff; }
+.check:not(.ok) .mark { border-color: var(--coral); }

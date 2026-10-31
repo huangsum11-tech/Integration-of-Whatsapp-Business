@@ -2,9 +2,9 @@
 
 **對話接棒，生意不斷。**
 
-把 WhatsApp 號碼和 Instagram 私訊變成團隊共用收件匣。可以掃 QR Code 幾分鐘連接現有號碼，也可以經 Meta 官方 API 連接。對話自動備份，同事離職時客戶關係留在公司。AI 根據公司知識庫回答客人：可以只草擬、預先建議，或全自動回覆，不確定時轉交同事。
+把 WhatsApp、Instagram、Facebook Messenger 和 Threads 變成團隊共用收件匣。可以掃 QR Code 幾分鐘連接現有號碼，也可以經 Meta 官方 API 連接。對話自動備份，同事離職時客戶關係留在公司。AI 根據公司知識庫回答客人：可以只草擬、預先建議，或全自動回覆，不確定時轉交同事。
 
-> **第一次設定？** 請看 **[完整設定指南 docs/SETUP.md](docs/SETUP.md)**：連接 WhatsApp／Instagram 官方 API、連接及轉換 AI 和模型、知識庫範本（[`docs/knowledge-template.csv`](docs/knowledge-template.csv)）及資料存放位置、轉用人工時在哪裡回覆客人。
+> **第一次設定？** 請看 **[完整設定指南 docs/SETUP.md](docs/SETUP.md)**（本機或雲端安裝、Meta App、WhatsApp／IG／Facebook／Threads 逐步連接、App 審查、AI 設定及上線次序）：連接 WhatsApp／Instagram 官方 API、連接及轉換 AI 和模型、知識庫範本（[`docs/knowledge-template.csv`](docs/knowledge-template.csv)）及資料存放位置、轉用人工時在哪裡回覆客人。
 
 ![收件匣](docs/screenshots/inbox.png)
 
@@ -24,7 +24,7 @@
 | **管理** | 每週 WhatsApp 營運報告、Google 評價邀請、一次通知多位導師。 |
 | **待人工** | AI 轉交的對話集中在收件匣「待人工」分頁，同事直接在 Baton 回覆，訊息經原本的 WhatsApp／Instagram 發給客人。 |
 | **多種 AI** | Claude、Gemini、Grok 任選，在「AI 助手」頁面切換；API 金鑰只放在伺服器環境變數。 |
-| **WhatsApp 官方 API 及 Instagram** | WhatsApp Cloud API 和 Instagram Messaging API 的訊息經同一個 webhook 進入收件匣，與 QR 連接的號碼並存。 |
+| **四個渠道** | WhatsApp Cloud API、Instagram、Facebook Messenger 經同一個 webhook 進入收件匣；Threads 帖子留言每 3 分鐘讀取一次並公開回覆。也支援 QR 連接的 WhatsApp。號碼頁有設定清單，顯示仍未完成的步驟。 |
 | **業務延續** | 「離職交接」即時停用登入，進行中的對話、負責的客戶及跟進中交易轉交接手同事；所有紀錄保留。 |
 | **管理層分析** | 回覆速度（中位數）、每日訊息量、每位同事及每個號碼的表現、成交金額。 |
 | **公司聯絡簿** | 每位客戶只有一筆資料，以電話號碼為準，所有號碼與同事共用。改名一次，所有收件匣同步更新。 |
@@ -77,12 +77,15 @@ server/src/
   llm.ts         Claude／Gemini／Grok 統一接口
   autoreply.ts   每個號碼的 AI 建議／全自動回覆、轉交同事
   channels.ts    按連接方式發送訊息
-  meta.ts        WhatsApp Cloud API、Instagram API、webhook
+  meta.ts        WhatsApp Cloud API、Instagram、Facebook Messenger、webhook
+  threads.ts     Threads 留言讀取及公開回覆
+  comments.ts    IG／FB 留言關鍵字自動私訊
+  tokens.ts      Instagram／Threads 權杖自動更新
+  setup.ts       設定清單
   knowledge.ts   知識庫 CSV 匯入／匯出
   payroll.ts     導師糧單：讀取 Vibefam 報表、發送、排程、月底提醒
   automation.ts  試堂紀錄及跟進、客人等待提醒
   campaigns.ts   客人標籤、分組、群發
-  igcomments.ts  IG 留言關鍵字自動私訊
   report.ts      每週報告
   transcribe.ts  語音轉文字（Gemini）
   time.ts        時區（香港時間）
@@ -105,6 +108,13 @@ npm run build                  # 建立前端
 npm run seed --workspace server  # 可選：建立示範資料
 cp .env.example .env           # 填入 AI 金鑰、Meta 設定（見 docs/SETUP.md）
 npm start                      # http://localhost:4000
+```
+
+或者用 Docker（雲端伺服器建議）：
+
+```bash
+cp .env.example .env
+docker compose up -d           # http://localhost:4000，資料存在 baton-data volume
 ```
 
 - **示範帳戶**（執行 seed 後）：`karen@baton.demo` ／ `baton-demo`。示範號碼不會連接 WhatsApp，但可以完整試用收件匣、交接、AI 草擬及分析。
@@ -136,7 +146,8 @@ npm run dev    # 前端 http://localhost:5173
 | `META_VERIFY_TOKEN` | | 自訂字串，在 Meta App 設定 webhook 時填同一個值 |
 | `META_APP_SECRET` | | Meta App 密鑰，用來驗證 webhook 簽名（正式使用必須設定） |
 | `INSTAGRAM_APP_SECRET` | | Instagram App 密鑰（如與 Meta App 密鑰不同） |
-| `META_GRAPH_VERSION` | `v23.0` | Meta Graph API 版本 |
+| `META_GRAPH_VERSION` | `v25.0` | Meta Graph API 版本 |
+| `BATON_THREADS_POLL_MS` | `180000` | 多久讀取一次 Threads 留言（毫秒） |
 | `BATON_TZ` | `Asia/Hong_Kong` | 糧單排程及月底提醒用的時區 |
 | `BATON_PAYROLL_GAP_MS` | `3000` | 每份糧單之間相隔多少毫秒 |
 | `BATON_BROADCAST_GAP_MS` | `10000` | 群發每條訊息之間大約相隔多少毫秒 |
@@ -162,7 +173,7 @@ npm run dev    # 前端 http://localhost:5173
 | 登入 | 分析 |
 | --- | --- |
 | ![](docs/screenshots/login.png) | ![](docs/screenshots/analytics.png) |
-| **號碼（QR 連接）** | **團隊（離職交接、AI 語氣）** |
+| **號碼（設定清單、連接渠道）** | **團隊（離職交接、AI 語氣）** |
 | ![](docs/screenshots/numbers.png) | ![](docs/screenshots/team.png) |
 | **AI 助手（知識庫、試問 AI、選擇 AI）** | **導師糧單** |
 | ![](docs/screenshots/assistant.png) | ![](docs/screenshots/payroll.png) |

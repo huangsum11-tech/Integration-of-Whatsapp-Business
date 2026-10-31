@@ -1,14 +1,17 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api, type Channel, type ReplyMode, type WaNumber } from '../api'
 import { useApp } from '../App'
 import { Icon, Modal, NumberStatus, type IconName } from '../components'
 import { formatPhone } from '../format'
 
 const CHANNELS: { id: Channel; icon: IconName; title: string; text: string }[] = [
-  { id: 'wa_web', icon: 'qr', title: 'WhatsApp（掃 QR Code）', text: '用現有的 WhatsApp Business App 號碼，一分鐘連接。非官方方式，自動回覆有封號風險。' },
-  { id: 'wa_cloud', icon: 'shield', title: 'WhatsApp 官方 Cloud API', text: 'Meta 官方接口，適合 AI 自動回覆。需要 Meta 開發者帳戶和電話號碼 ID。' },
-  { id: 'instagram', icon: 'instagram', title: 'Instagram DM', text: '經 Instagram 官方 API 接收及回覆私訊。需要 Instagram 專業帳戶。' },
+  { id: 'wa_cloud', icon: 'shield', title: 'WhatsApp 官方 Cloud API（建議）', text: 'Meta 官方接口，適合 AI 自動回覆。需要 Meta App、電話號碼 ID 和永久權杖。' },
+  { id: 'instagram', icon: 'instagram', title: 'Instagram DM', text: '經 Instagram 官方 API 接收及回覆私訊、留言自動私訊。需要 Instagram 專業帳戶。' },
+  { id: 'messenger', icon: 'facebook', title: 'Facebook Messenger', text: '回覆 Facebook 專頁私訊、專頁留言自動私訊。需要專頁 ID 和專頁存取權杖。' },
+  { id: 'threads', icon: 'threads', title: 'Threads 留言', text: 'Threads 沒有私訊 API：讀取你帖子下的留言並公開回覆。' },
+  { id: 'wa_web', icon: 'qr', title: 'WhatsApp（掃 QR Code，非官方）', text: '用現有的 WhatsApp Business App 號碼，一分鐘連接。只建議人手回覆，自動回覆有封號風險。' },
 ]
+const CHANNEL_ICON: Record<Channel, IconName> = { wa_web: 'phone', wa_cloud: 'phone', instagram: 'instagram', messenger: 'facebook', threads: 'threads' }
 
 const MODES: { id: ReplyMode; label: string; hint: string }[] = [
   { id: 'off', label: '關閉', hint: '同事手動回覆，可隨時按「AI 草擬」' },
@@ -22,6 +25,7 @@ export default function Numbers() {
   const [linkingId, setLinkingId] = useState<number | null>(null)
   const isAdmin = me.role === 'admin'
   const linking = numbers.find((n) => n.id === linkingId)
+  const [setupKey, setSetupKey] = useState(0)
 
   const [syncing, setSyncing] = useState<number | null>(null)
   const [syncResult, setSyncResult] = useState('')
@@ -48,7 +52,7 @@ export default function Numbers() {
     if (reply_mode === 'auto' && n.channel === 'wa_web' && !n.demo &&
       !confirm('QR Code 連接是非官方方式。讓 AI 全自動回覆，號碼被 WhatsApp 限制或封鎖的風險會較高。建議改用官方 Cloud API。仍然開啟？')) return
     await api(`/numbers/${n.id}`, { method: 'PATCH', body: { reply_mode } })
-    refreshNumbers()
+    refreshNumbers(); setSetupKey((k) => k + 1)
   }
 
   return (
@@ -56,10 +60,11 @@ export default function Numbers() {
       <div className="page-head">
         <div>
           <h1>號碼與帳戶</h1>
-          <p>連接 WhatsApp 號碼和 Instagram 帳戶，並設定每個號碼的 AI 回覆方式。</p>
+          <p>連接 WhatsApp、Instagram、Facebook Messenger 和 Threads，並設定每個帳戶的 AI 回覆方式。</p>
         </div>
       </div>
 
+      <SetupChecklist key={setupKey} />
       {syncResult && <div className="demo-hint" style={{ marginBottom: 16 }}>{syncResult}</div>}
       <div className="number-cards">
         {numbers.map((n) => {
@@ -68,7 +73,7 @@ export default function Numbers() {
           return (
             <div key={n.id} className="card number-card">
               <div className="top">
-                <div className="icon"><Icon name={n.channel === 'instagram' ? 'instagram' : 'phone'} size={22} /></div>
+                <div className="icon"><Icon name={CHANNEL_ICON[n.channel] ?? 'phone'} size={22} /></div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 15 }}>{n.label}</div>
                   <div className="muted num" style={{ fontSize: 13 }}>{formatPhone(n.phone) || '尚未連接'}</div>
@@ -105,13 +110,14 @@ export default function Numbers() {
           <button className="add-card" onClick={() => setAdding(true)}>
             <Icon name="plus" size={26} />
             <b>連接新號碼或帳戶</b>
-            <span style={{ fontSize: 12 }}>WhatsApp 或 Instagram</span>
+            <span style={{ fontSize: 12 }}>WhatsApp、Instagram、Facebook、Threads</span>
           </button>
         )}
       </div>
 
-      {adding && <AddModal onClose={() => setAdding(false)} onCreated={(id, channel) => {
-        setAdding(false); refreshNumbers()
+      {adding && <AddModal onClose={() => setAdding(false)} onCreated={(id, channel, warning) => {
+        setAdding(false); refreshNumbers(); setSetupKey((k) => k + 1)
+        if (warning) setSyncResult(warning)
         if (channel === 'wa_web') setLinkingId(id)
       }} />}
 
@@ -141,9 +147,15 @@ export default function Numbers() {
   )
 }
 
-function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: number, channel: Channel) => void }) {
+const WEBHOOK_FIELDS: Partial<Record<Channel, string>> = {
+  wa_cloud: 'messages',
+  instagram: 'messages, comments',
+  messenger: 'messages, message_echoes, feed',
+}
+
+function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: number, channel: Channel, warning?: string) => void }) {
   const [channel, setChannel] = useState<Channel | null>(null)
-  const [form, setForm] = useState({ label: '', phoneNumberId: '', accessToken: '' })
+  const [form, setForm] = useState({ label: '', phoneNumberId: '', pageId: '', accessToken: '' })
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const webhookUrl = `${window.location.origin}/webhooks/meta`
@@ -153,10 +165,11 @@ function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id:
     setBusy(true); setError('')
     try {
       const body = channel === 'wa_web' ? { channel, label: form.label }
-        : channel === 'wa_cloud' ? { channel, ...form }
+        : channel === 'wa_cloud' ? { channel, label: form.label, phoneNumberId: form.phoneNumberId, accessToken: form.accessToken }
+        : channel === 'messenger' ? { channel, label: form.label, pageId: form.pageId, accessToken: form.accessToken }
         : { channel, label: form.label, accessToken: form.accessToken }
-      const { id } = await api<{ id: number }>('/numbers', { body })
-      onCreated(id, channel)
+      const { id, warning } = await api<{ id: number; warning?: string }>('/numbers', { body })
+      onCreated(id, channel, warning)
     } catch (err) {
       setError(err instanceof Error ? err.message : '未能連接')
     } finally {
@@ -180,12 +193,20 @@ function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id:
     )
   }
 
-  const ready = form.label && (channel === 'wa_web' || (form.accessToken && (channel === 'instagram' || form.phoneNumberId)))
+  const ready = form.label && (channel === 'wa_web' || (form.accessToken
+    && (channel !== 'wa_cloud' || form.phoneNumberId) && (channel !== 'messenger' || form.pageId)))
+  const token = (label: string) => (
+    <div>
+      <label className="label" htmlFor="num-token">{label}</label>
+      <input id="num-token" className="input" type="password" autoComplete="off" value={form.accessToken}
+        onChange={(e) => setForm({ ...form, accessToken: e.target.value.trim() })} />
+    </div>
+  )
   return (
     <Modal title={CHANNELS.find((c) => c.id === channel)!.title} onClose={onClose}>
       <div>
         <label className="label" htmlFor="num-label">名稱（團隊內部用）</label>
-        <input id="num-label" className="input" autoFocus placeholder={channel === 'instagram' ? '例如：Instagram 主帳戶' : '例如：客戶熱線、旺角分店'}
+        <input id="num-label" className="input" autoFocus placeholder={channel.startsWith('wa_') ? '例如：客戶熱線、旺角分店' : '例如：主帳戶'}
           value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} />
       </div>
       {channel === 'wa_cloud' && (
@@ -195,27 +216,33 @@ function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id:
             <input id="num-pnid" className="input num" inputMode="numeric" placeholder="在 Meta App → WhatsApp → API 設定找到"
               value={form.phoneNumberId} onChange={(e) => setForm({ ...form, phoneNumberId: e.target.value.trim() })} />
           </div>
-          <div>
-            <label className="label" htmlFor="num-token">永久存取權杖（System User access token）</label>
-            <input id="num-token" className="input" type="password" autoComplete="off" value={form.accessToken}
-              onChange={(e) => setForm({ ...form, accessToken: e.target.value.trim() })} />
-          </div>
+          {token('永久存取權杖（System User access token）')}
         </>
       )}
-      {channel === 'instagram' && (
-        <div>
-          <label className="label" htmlFor="num-token">Instagram 存取權杖（Instagram API with Instagram Login）</label>
-          <input id="num-token" className="input" type="password" autoComplete="off" value={form.accessToken}
-            onChange={(e) => setForm({ ...form, accessToken: e.target.value.trim() })} />
-        </div>
+      {channel === 'instagram' && token('Instagram 存取權杖（Instagram API with Instagram Login）')}
+      {channel === 'messenger' && (
+        <>
+          <div>
+            <label className="label" htmlFor="num-page">Facebook 專頁 ID（Page ID）</label>
+            <input id="num-page" className="input num" inputMode="numeric" placeholder="專頁 →「關於」→ 專頁透明度，或 Meta App → Messenger 設定"
+              value={form.pageId} onChange={(e) => setForm({ ...form, pageId: e.target.value.trim() })} />
+          </div>
+          {token('專頁存取權杖（Page access token，建議用系統用戶產生的永久權杖）')}
+        </>
       )}
-      {channel !== 'wa_web' && (
+      {channel === 'threads' && token('Threads 長期存取權杖（long-lived access token）')}
+      {WEBHOOK_FIELDS[channel] && (
         <div className="demo-hint">
           在 Meta App 的 Webhooks 設定：<br />
           回呼網址：<code>{webhookUrl}</code><br />
           驗證權杖：伺服器環境變數 <code>META_VERIFY_TOKEN</code> 的值<br />
-          訂閱欄位：<code>messages</code>
-          {window.location.protocol !== 'https:' && <><br />⚠️ Meta 只接受 HTTPS 網址，開發時可用 ngrok 之類的工具。</>}
+          訂閱欄位：<code>{WEBHOOK_FIELDS[channel]}</code>
+          {window.location.protocol !== 'https:' && <><br />⚠️ Meta 只接受 HTTPS 網址，開發時可用 ngrok 或 Cloudflare Tunnel。</>}
+        </div>
+      )}
+      {channel === 'threads' && (
+        <div className="demo-hint">
+          Threads 沒有私訊 API：Baton 每 3 分鐘讀取你最近 7 日帖子下的留言，回覆會<b>公開</b>貼在客人留言下面。建議這個帳戶用「AI 建議」模式。
         </div>
       )}
       {error && <div className="error">{error}</div>}
@@ -226,5 +253,35 @@ function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id:
         </button>
       </div>
     </Modal>
+  )
+}
+
+interface Check { id: string; label: string; ok: boolean; optional?: boolean; detail: string; page: string }
+
+/** What is done and what is left before the AI can answer customers on every channel. */
+function SetupChecklist() {
+  const [checks, setChecks] = useState<Check[]>([])
+  const [open, setOpen] = useState(true)
+  useEffect(() => { api<Check[]>('/setup-status').then(setChecks) }, [])
+  if (!checks.length) return null
+  const required = checks.filter((c) => !c.optional)
+  const done = required.filter((c) => c.ok).length
+  return (
+    <section className="card ai-card setup-card">
+      <div className="ai-card-head">
+        <h2><Icon name="check" size={18} />設定清單（必需 {done}／{required.length}）</h2>
+        <button className="btn ghost sm" onClick={() => setOpen(!open)}>{open ? '收起' : '展開'}</button>
+      </div>
+      {open && (
+        <div className="checklist">
+          {checks.map((c) => (
+            <a key={c.id} className={`check ${c.ok ? 'ok' : ''}`} href={`#/${c.page}`}>
+              <span className="mark">{c.ok ? <Icon name="check" size={14} /> : null}</span>
+              <span><b>{c.label}</b>{c.optional && <span className="faint">（可選）</span>}<br /><span className="muted">{c.detail}</span></span>
+            </a>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }

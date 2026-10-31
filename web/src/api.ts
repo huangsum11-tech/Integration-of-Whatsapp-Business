@@ -35,7 +35,13 @@ export interface Conversation {
   needs_human: number
 }
 
-export type Channel = 'wa_web' | 'wa_cloud' | 'instagram'
+export type Channel = 'wa_web' | 'wa_cloud' | 'instagram' | 'messenger' | 'threads'
+
+export const CHANNEL_LABEL: Record<Channel, string> = {
+  wa_web: 'WhatsApp', wa_cloud: 'WhatsApp', instagram: 'Instagram', messenger: 'Facebook Messenger', threads: 'Threads',
+}
+/** Broadcasts, payslips and alerts go to phone numbers, so only WhatsApp numbers can send them. */
+export const isWhatsApp = (c: Channel) => c === 'wa_web' || c === 'wa_cloud'
 export type ReplyMode = 'off' | 'suggest' | 'auto'
 
 export interface Message {
@@ -56,8 +62,8 @@ export interface InboxEvent {
 export interface Contact {
   id: number; phone: string | null; lid: string | null; name: string | null; saved_name: string | null
   wa_name: string | null; notes: string
-  /** 1 for Instagram customers, who have no phone number. */
-  instagram?: number
+  /** 'Instagram' / 'Facebook' / 'Threads' for social-media customers, who have no phone number. */
+  social?: string | null
   owner_id: number | null; display_name?: string; owner_name?: string | null
   conversations?: number; numbers?: string | null; tags?: string | null; last_message_at?: number | null; won_amount?: number
 }
@@ -71,7 +77,7 @@ export interface WaNumber {
   id: number; label: string; phone: string | null; status: string; demo: number
   conversations: number; qr: string | null; channel: Channel; reply_mode: ReplyMode
   /** Official API IDs (never the access token). */
-  ids: { phoneNumberId?: string; igUserId?: string; username?: string }
+  ids: { phoneNumberId?: string; igUserId?: string; pageId?: string; userId?: string; username?: string; name?: string }
 }
 
 export type KnowledgeCategory = 'faq' | 'policy' | 'class' | 'other'

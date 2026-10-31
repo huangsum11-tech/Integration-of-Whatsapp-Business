@@ -95,7 +95,7 @@ export default function Contacts() {
                       )}
                     </div>
                   </td>
-                  <td className="num muted">{c.instagram ? <span className="faint">Instagram</span> : formatPhone(c.phone) || <span className="faint">號碼未同步</span>}</td>
+                  <td className="num muted">{c.social ? <span className="faint">{c.social}</span> : formatPhone(c.phone) || <span className="faint">號碼未同步</span>}</td>
                   <td>{c.numbers?.split(',').map((n) => <span key={n} className="number-tag" style={{ marginRight: 4 }}>{n}</span>)}</td>
                   <td>{c.tags?.split('、').map((t) => <span key={t} className="chip" style={{ marginRight: 4 }}>{t}</span>)}</td>
                   <td>{owner ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Avatar name={owner.name} color={owner.color} size={20} />{owner.name}{!owner.active && <span className="chip">已離職</span>}</span> : <span className="faint">—</span>}</td>

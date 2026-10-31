@@ -1,10 +1,20 @@
 /** Sending a reply, whichever way the number is connected. */
 import { get, run } from './db.js'
 import { getConversation, storeMessage } from './inbox.js'
-import { sendCloudTemplate, sendCloudText, sendInstagramText, type TemplateMessage } from './meta.js'
+import { sendCloudTemplate, sendCloudText, sendInstagramText, sendMessengerText, type TemplateMessage } from './meta.js'
+import { sendThreadsReply } from './threads.js'
 import { isConnected, sendText } from './whatsapp.js'
 
-export type Channel = 'wa_web' | 'wa_cloud' | 'instagram'
+export type Channel = 'wa_web' | 'wa_cloud' | 'instagram' | 'messenger' | 'threads'
+
+/** Who the customer is, from the conversation's address ("<id>@instagram", "<psid>@messenger", "<user>@threads", or a WhatsApp JID). */
+function contactFor(jid: string, phone: string | null) {
+  const [id, domain] = jid.split('@')
+  if (domain === 'instagram') return { ig: id }
+  if (domain === 'messenger') return { fb: id }
+  if (domain === 'threads') return { th: id }
+  return { pn: phone ?? id }
+}
 
 export function canSend(numberId: number) {
   const n = get<{ demo: number; channel: Channel; status: string }>('SELECT demo, channel, status FROM numbers WHERE id = ?', numberId)
@@ -30,15 +40,18 @@ export async function sendReply(conversationId: number, text: string, opts: Send
     aiAssisted: opts.aiAssisted ?? false, aiAuto: opts.aiAuto ?? false, type: 'text' as const, body: text,
     ts: Math.floor(Date.now() / 1000), live: true,
   }
-  const contact = conversation.channel === 'instagram' ? { ig: conversation.jid.split('@')[0] } : { pn: conversation.phone ?? conversation.jid.split('@')[0] }
+  const contact = contactFor(conversation.jid, conversation.phone)
 
   if (number.demo) {
     storeMessage({ ...message, contact, waId: `demo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })
   } else if (number.channel === 'wa_web') {
     await sendText(conversation.number_id, conversation.jid, text, opts.userId, message.aiAssisted, message.aiAuto)
   } else {
-    const send = number.channel === 'wa_cloud' ? sendCloudText : sendInstagramText
-    const waId = await send(conversation.number_id, conversationId, conversation.jid, text)
+    const waId = number.channel === 'threads'
+      ? await sendThreadsReply(conversation.number_id, conversationId, text)
+      : await ({ wa_cloud: sendCloudText, instagram: sendInstagramText, messenger: sendMessengerText } as const)[number.channel](
+        conversation.number_id, conversationId, conversation.jid, text,
+      )
     // Instagram may deliver the echo of this message before we get here; credit the sender either way.
     if (!storeMessage({ ...message, contact, waId })) {
       run('UPDATE messages SET sender_id = ?, ai_assisted = ?, ai_auto = ? WHERE conversation_id = ? AND wa_id = ?',
@@ -81,6 +94,6 @@ export async function sendToPhone(numberId: number, phone: string, text: string,
     storeMessage({ ...message, waId })
     return waId
   } else {
-    throw new Error('Instagram 不能主動發訊息給電話號碼，請選 WhatsApp 號碼')
+    throw new Error('Instagram／Facebook／Threads 不能主動發訊息給電話號碼，請選 WhatsApp 號碼')
   }
 }
