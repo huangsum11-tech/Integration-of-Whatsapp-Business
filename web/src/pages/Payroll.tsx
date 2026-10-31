@@ -60,6 +60,7 @@ export default function Payroll() {
         <div className="ai-col">
           <SettingsCard data={data} onSaved={load} />
           <Instructors instructors={data.instructors} onChanged={load} />
+          <NotifyInstructors instructors={data.instructors} />
         </div>
       </div>
     </div>
@@ -383,6 +384,44 @@ function Instructors({ instructors, onChanged }: { instructors: Instructor[]; on
         <button className="btn sm" disabled={!form.name.trim()} onClick={add} aria-label="新增導師"><Icon name="plus" size={15} /></button>
       </div>
       {error && <div className="error" style={{ marginTop: 6 }}>{error}</div>}
+    </section>
+  )
+}
+
+function NotifyInstructors({ instructors }: { instructors: Instructor[] }) {
+  const active = instructors.filter((i) => i.active)
+  const [ids, setIds] = useState<number[]>([])
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [results, setResults] = useState<{ name: string; ok: boolean; error?: string }[] | null>(null)
+  const [error, setError] = useState('')
+  const toggle = (id: number) => setIds(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id])
+  const send = async () => {
+    if (!confirm(`發送給 ${ids.length} 位導師？`)) return
+    setBusy(true); setError(''); setResults(null)
+    try { setResults((await api<{ results: { name: string; ok: boolean; error?: string }[] }>('/payroll/notify', { body: { message, ids } })).results) }
+    catch (err) { setError(err instanceof Error ? err.message : '發送失敗') }
+    finally { setBusy(false) }
+  }
+  return (
+    <section className="card ai-card">
+      <div className="ai-card-head"><h2><Icon name="megaphone" size={18} />通知導師</h2></div>
+      <p className="muted" style={{ margin: '0 0 10px', fontSize: 13 }}>代課、請假、時間表更改等，一次發給選中的導師。{'{導師}'} 會換成導師名稱。</p>
+      <div className="tag-list" style={{ marginBottom: 8 }}>
+        <button type="button" className={`chip ${ids.length === active.length && active.length ? 'pine' : ''}`} style={{ border: 0, cursor: 'pointer' }}
+          onClick={() => setIds(ids.length === active.length ? [] : active.map((i) => i.id))}>全部</button>
+        {active.map((i) => (
+          <button key={i.id} type="button" className={`chip ${ids.includes(i.id) ? 'pine' : ''}`} style={{ border: 0, cursor: 'pointer' }} onClick={() => toggle(i.id)}>
+            {ids.includes(i.id) && <Icon name="check" size={11} />}{i.name}{i.phone ? '' : '（無電話）'}
+          </button>
+        ))}
+      </div>
+      <textarea className="textarea" rows={4} value={message} placeholder={'例如：{導師} 你好，12/12（六）10:00 Reformer 需要代課，有冇時間？'} onChange={(e) => setMessage(e.target.value)} />
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+        <button className="btn primary sm" disabled={busy || !ids.length || !message.trim()} onClick={send}>{busy ? '發送中…' : `發送（${ids.length}）`}</button>
+      </div>
+      {error && <div className="error">{error}</div>}
+      {results && <div className="faint" style={{ fontSize: 13, marginTop: 6 }}>{results.map((r) => `${r.name}：${r.ok ? '已發送' : `失敗（${r.error}）`}`).join('；')}</div>}
     </section>
   )
 }

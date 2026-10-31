@@ -11,9 +11,11 @@ interface Settings {
   followup_wa_template_name: string; followup_wa_template_language: string
   alert_enabled: boolean; alert_minutes: number; alert_phone: string; alert_from_hour: number; alert_to_hour: number
 }
+interface Report { report_enabled: boolean; report_phones: string; report_weekday: number; report_hour: number }
 interface Overview {
   settings: Settings; defaultFollowup: string; trials: (Trial & { contact_name: string })[]
   team: { id: number; name: string; phone: string }[]
+  report: Report; review: { url: string; message: string }; transcription: boolean
 }
 
 const FOLLOWUP: Record<Trial['followup_status'], [string, string]> = {
@@ -47,9 +49,19 @@ export default function Automation() {
         <div className="ai-col">
           <TrialsCard trials={data.trials} />
           <QuickRepliesCard isAdmin={isAdmin} />
+          <ReviewCard review={data.review} isAdmin={isAdmin} onSaved={load} />
         </div>
         <div className="ai-col">
           <SettingsCard data={data} isAdmin={isAdmin} onSaved={load} />
+          <ReportCard report={data.report} isAdmin={isAdmin} onSaved={load} />
+          <section className="card ai-card">
+            <div className="ai-card-head"><h2><Icon name="note" size={18} />語音轉文字</h2></div>
+            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+              {data.transcription
+                ? '已啟用：客人的語音訊息會自動轉成文字，顯示在語音下面，AI 也會根據內容回覆。'
+                : '未啟用：在伺服器 .env 填寫 GEMINI_API_KEY 後重新啟動即可（不論你用哪個 AI 回覆客人，轉文字都用 Gemini）。'}
+            </p>
+          </section>
         </div>
       </div>
     </div>
@@ -252,6 +264,83 @@ function QuickRepliesCard({ isAdmin }: { isAdmin: boolean }) {
           </div>
         </Modal>
       )}
+    </section>
+  )
+}
+
+const WEEKDAYS = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
+
+function ReportCard({ report, isAdmin, onSaved }: { report: Report; isAdmin: boolean; onSaved: () => void }) {
+  const [form, setForm] = useState(report)
+  const [preview, setPreview] = useState('')
+  const [msg, setMsg] = useState('')
+  useEffect(() => setForm(report), [report])
+  const save = async () => { await api('/automation/report', { method: 'PUT', body: form }); setMsg('已儲存'); onSaved() }
+  const sendNow = async () => {
+    setMsg('')
+    try { const r = await api<{ sent: number }>('/automation/report/send', { body: {} }); setMsg(`已發送給 ${r.sent} 個號碼`) }
+    catch (err) { setMsg(err instanceof Error ? err.message : '發送失敗') }
+  }
+  return (
+    <section className="card ai-card">
+      <div className="ai-card-head"><h2><Icon name="chart" size={18} />每週報告</h2></div>
+      <fieldset className="form-stack" disabled={!isAdmin}>
+        <label className="toggle-row">
+          <input type="checkbox" checked={form.report_enabled} onChange={(e) => setForm({ ...form, report_enabled: e.target.checked })} />
+          每星期用 WhatsApp 發送營運報告
+        </label>
+        <div className="col-pick">
+          <div>
+            <label className="label">星期幾</label>
+            <select className="select" value={form.report_weekday} onChange={(e) => setForm({ ...form, report_weekday: Number(e.target.value) })}>
+              {WEEKDAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">時間</label>
+            <select className="select" value={form.report_hour} onChange={(e) => setForm({ ...form, report_hour: Number(e.target.value) })}>
+              {hours.slice(0, 24).map((h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label className="label">收報告的 WhatsApp 號碼（多個用逗號分隔）</label>
+          <input className="input" inputMode="tel" value={form.report_phones} placeholder="例如 9123 4567, 6123 4567" onChange={(e) => setForm({ ...form, report_phones: e.target.value })} />
+        </div>
+        {preview && <div className="payslip-message">{preview}</div>}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}>
+          {msg && <span className="muted" style={{ fontSize: 13 }}>{msg}</span>}
+          <button type="button" className="btn ghost sm" onClick={() => api<{ text: string }>('/automation/report/preview').then((r) => setPreview(r.text))}>預覽</button>
+          <button type="button" className="btn sm" onClick={sendNow}>立即發送一次</button>
+          <button type="button" className="btn primary sm" onClick={save}>儲存</button>
+        </div>
+      </fieldset>
+    </section>
+  )
+}
+
+function ReviewCard({ review, isAdmin, onSaved }: { review: Overview['review']; isAdmin: boolean; onSaved: () => void }) {
+  const [form, setForm] = useState(review)
+  const [saved, setSaved] = useState(false)
+  useEffect(() => setForm(review), [review])
+  return (
+    <section className="card ai-card">
+      <div className="ai-card-head"><h2><Icon name="trophy" size={18} />Google 評價邀請</h2></div>
+      <p className="muted" style={{ margin: '0 0 10px', fontSize: 13 }}>在收件匣對話右邊按「邀請 Google 評價」，就會發以下訊息給客人。</p>
+      <fieldset className="form-stack" disabled={!isAdmin}>
+        <div>
+          <label className="label">Google 評價連結（Google 商家 → 取得更多評論 → 分享連結）</label>
+          <input className="input" type="url" value={form.url} placeholder="https://g.page/r/…/review" onChange={(e) => setForm({ ...form, url: e.target.value })} />
+        </div>
+        <div>
+          <label className="label">訊息（{'{名稱}'} = 客人名稱，{'{連結}'} = 評價連結）</label>
+          <textarea className="textarea" rows={4} value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>
+          {saved && <span className="muted" style={{ fontSize: 13 }}>已儲存</span>}
+          <button type="button" className="btn primary sm" onClick={async () => { await api('/automation/review', { method: 'PUT', body: form }); setSaved(true); onSaved() }}>儲存</button>
+        </div>
+      </fieldset>
     </section>
   )
 }

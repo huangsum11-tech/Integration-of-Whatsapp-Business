@@ -44,6 +44,8 @@ export interface Message {
   media_path: string | null; media_mime: string | null; ts: number; ai_assisted: number
   /** Sent by the AI on its own. */
   ai_auto: number
+  /** Text of a voice message. */
+  transcript: string | null
 }
 
 export interface InboxEvent {

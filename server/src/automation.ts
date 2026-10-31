@@ -9,6 +9,7 @@ import { normalizePhone, sendReply, sendToPhone } from './channels.js'
 import { CONTACT_NAME_SQL, all, get, getSetting, run, setSetting, tx } from './db.js'
 import { addEvent, getConversation } from './inbox.js'
 import { broadcast } from './realtime.js'
+import { reportTick } from './report.js'
 import { formatLocal, localParts } from './time.js'
 
 export const DEFAULT_FOLLOWUP = `{名稱} 你好！今日試堂感覺點呀？😊
@@ -178,5 +179,6 @@ export function startAutomation() {
   setInterval(() => {
     followUps().catch((err) => console.error('Trial follow-ups failed', err))
     waitingAlerts().catch((err) => console.error('Waiting alerts failed', err))
+    reportTick().catch((err) => console.error('Weekly report failed', err))
   }, 60_000)
 }

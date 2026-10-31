@@ -3,6 +3,8 @@ import { CONTACT_NAME_SQL, CONTACT_PHONE_SQL, all, get, run, tx } from './db.js'
 import { broadcast } from './realtime.js'
 
 /**
+ * Also emits 'media-saved' ({ messageId }) when a message's media finishes downloading,
+ * and 'transcribed' ({ messageId }) when a voice message has been turned into text.
  * Emits 'customer-message' and 'team-message' ({ conversationId, numberId, messageId }) for each
  * new live message from a customer, or from the team (sent in Baton, from the phone, or by the AI).
  */
@@ -218,6 +220,8 @@ export function setMessageMedia(numberId: number, waId: string, mediaPath: strin
      WHERE wa_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE number_id = ?)`,
     mediaPath, mime, waId, numberId,
   )
+  const m = get<{ id: number }>('SELECT id FROM messages WHERE wa_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE number_id = ?)', waId, numberId)
+  if (m) inboxEvents.emit('media-saved', { messageId: m.id })
 }
 
 const CONVERSATION_SELECT = `

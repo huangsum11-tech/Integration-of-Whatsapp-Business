@@ -18,6 +18,10 @@
 | **AI 自動回覆** | 每個號碼可設定「關閉／AI 建議／全自動」。常見問題按關鍵字直接用團隊寫好的答案回覆（不經 AI）；其他問題由 AI 根據知識庫回答；知識庫沒有的資料、預約／退款等要人手處理的事、投訴或要求真人時，轉交同事。同事一回覆，AI 就在該對話暫停，直到按「恢復 AI」或對話完成。 |
 | **知識庫** | 「AI 助手」頁面管理公司資料、常見問題、政策和課程資料；可以用 Excel／Google Sheets 編輯 CSV 再匯入或匯出；附普拉提／健身室範本；可以「試問 AI」預覽回答。 |
 | **導師糧單** | 上載從 Vibefam 匯出的每月糧單報表（CSV），自動按導師整理、套用訊息範本，預覽後經 WhatsApp 逐一發給導師（即時或排程）；每月最後一日用 WhatsApp 提醒管理員上載。糧單對話只有管理員看到。 |
+| **試堂流程** | AI 給新客人試堂預約連結（舊學生給一般預約連結）；客人告訴 AI 試堂時間後自動記錄；上堂後（預設 2 小時）自動發跟進訊息。 |
+| **不漏客** | 客人等待太耐，WhatsApp 提醒負責同事；快速回覆（`/捷徑`）；語音訊息自動轉文字（Gemini）。 |
+| **推廣** | 客人標籤及分組、WhatsApp 群發（即時／排程、測試、送達／已讀／回覆統計、AI 自動解答優惠）、IG 留言關鍵字自動私訊、匯入客人名單。 |
+| **管理** | 每週 WhatsApp 營運報告、Google 評價邀請、一次通知多位導師。 |
 | **待人工** | AI 轉交的對話集中在收件匣「待人工」分頁，同事直接在 Baton 回覆，訊息經原本的 WhatsApp／Instagram 發給客人。 |
 | **多種 AI** | Claude、Gemini、Grok 任選，在「AI 助手」頁面切換；API 金鑰只放在伺服器環境變數。 |
 | **WhatsApp 官方 API 及 Instagram** | WhatsApp Cloud API 和 Instagram Messaging API 的訊息經同一個 webhook 進入收件匣，與 QR 連接的號碼並存。 |
@@ -76,13 +80,19 @@ server/src/
   meta.ts        WhatsApp Cloud API、Instagram API、webhook
   knowledge.ts   知識庫 CSV 匯入／匯出
   payroll.ts     導師糧單：讀取 Vibefam 報表、發送、排程、月底提醒
+  automation.ts  試堂紀錄及跟進、客人等待提醒
+  campaigns.ts   客人標籤、分組、群發
+  igcomments.ts  IG 留言關鍵字自動私訊
+  report.ts      每週報告
+  transcribe.ts  語音轉文字（Gemini）
+  time.ts        時區（香港時間）
   env.ts         讀取 .env
   analytics.ts   回覆速度、活躍度、成交
   routes.ts      REST API
   seed.ts        示範資料
 web/src/
   App.tsx        登入、導航、全域狀態
-  pages/         Inbox、Contacts、Analytics、Assistant（AI 助手）、Payroll（糧單）、Numbers、Team
+  pages/         Inbox、Contacts、Analytics、Assistant（AI 助手）、Marketing（推廣）、Automation（自動化）、Payroll（糧單）、Numbers、Team
 ```
 
 ## 開始使用
@@ -129,6 +139,7 @@ npm run dev    # 前端 http://localhost:5173
 | `META_GRAPH_VERSION` | `v23.0` | Meta Graph API 版本 |
 | `BATON_TZ` | `Asia/Hong_Kong` | 糧單排程及月底提醒用的時區 |
 | `BATON_PAYROLL_GAP_MS` | `3000` | 每份糧單之間相隔多少毫秒 |
+| `BATON_BROADCAST_GAP_MS` | `10000` | 群發每條訊息之間大約相隔多少毫秒 |
 | `BATON_WA_LOG` | `warn` | Baileys 日誌等級 |
 | `NODE_ENV` | | 設為 `production` 時 cookie 只經 HTTPS 傳送 |
 
@@ -155,6 +166,8 @@ npm run dev    # 前端 http://localhost:5173
 | ![](docs/screenshots/numbers.png) | ![](docs/screenshots/team.png) |
 | **AI 助手（知識庫、試問 AI、選擇 AI）** | **導師糧單** |
 | ![](docs/screenshots/assistant.png) | ![](docs/screenshots/payroll.png) |
+| **推廣（群發）** | |
+| ![](docs/screenshots/marketing.png) | |
 
 ## 尚未包括
 

@@ -344,10 +344,12 @@ function Bubble({ m }: { m: Message }) {
     return null
   })()
   const showBody = m.body && !['document', 'location', 'contact'].includes(m.type)
+  const transcript = m.transcript ? <div className="transcript"><Icon name="note" size={12} />{m.transcript}</div> : null
   return (
     <div className={`bubble-row ${m.from_me ? 'out' : 'in'}`}>
       <div className={`bubble ${m.ai_assisted ? 'ai' : ''}`}>
         {mediaEl}
+        {transcript}
         {showBody && m.body}
       </div>
       <div className="bubble-meta">
@@ -384,6 +386,7 @@ function EventLine({ e }: { e: InboxEvent }) {
     ai_resumed: `${who} 恢復了 AI 自動回覆`,
     ai_error: 'AI 回覆失敗',
     trial: e.user_id ? `${who} 記錄了試堂` : 'AI 記錄了試堂',
+    review: `${who} 發送了 Google 評價邀請`,
   }
   return (
     <div className={`event ${e.kind === 'handoff' || e.kind === 'offboard' || e.kind === 'ai_handoff' || e.kind === 'ai_error' ? 'handoff' : ''}`}>
@@ -487,6 +490,7 @@ function SidePanel({ detail, reload }: { detail: Detail; reload: () => void }) {
           onBlur={() => notes !== contact.notes && saveContact({ notes })} placeholder="喜好、地址、注意事項…全公司共用" />
       </div>
 
+      <ReviewButton conversationId={conversation.id} />
       <TagSection detail={detail} reload={reload} />
       <TrialSection detail={detail} reload={reload} />
 
@@ -604,6 +608,22 @@ function TagSection({ detail, reload }: { detail: Detail; reload: () => void }) 
         <datalist id="known-tags">{known.filter((k) => !detail.tags.includes(k.tag)).map((k) => <option key={k.tag} value={k.tag} />)}</datalist>
         <button className="btn sm" disabled={!tag.trim()} onClick={add} aria-label="加入標籤"><Icon name="plus" size={15} /></button>
       </div>
+    </div>
+  )
+}
+
+function ReviewButton({ conversationId }: { conversationId: number }) {
+  const [msg, setMsg] = useState('')
+  const send = async () => {
+    if (!confirm('發送 Google 評價邀請給這位客人？')) return
+    setMsg('')
+    try { await api(`/conversations/${conversationId}/review`, { body: {} }); setMsg('已發送') }
+    catch (err) { setMsg(err instanceof Error ? err.message : '發送失敗') }
+  }
+  return (
+    <div className="side-section" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <button className="btn sm" onClick={send}><Icon name="trophy" size={14} />邀請 Google 評價</button>
+      {msg && <span className="muted" style={{ fontSize: 12 }}>{msg}</span>}
     </div>
   )
 }

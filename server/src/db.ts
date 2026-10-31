@@ -168,6 +168,8 @@ if (!columns('conversations').includes('needs_human')) db.exec('ALTER TABLE conv
 if (!columns('conversations').includes('human_alert_at')) db.exec('ALTER TABLE conversations ADD COLUMN human_alert_at INTEGER')
 // Teammate's own WhatsApp number, for "customer waiting" alerts.
 if (!columns('users').includes('phone')) db.exec("ALTER TABLE users ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
+// Text of a voice message (Gemini transcription).
+if (!columns('messages').includes('transcript')) db.exec('ALTER TABLE messages ADD COLUMN transcript TEXT')
 // Sent by the AI on its own, with no teammate reviewing it.
 if (!columns('messages').includes('ai_auto')) db.exec('ALTER TABLE messages ADD COLUMN ai_auto INTEGER NOT NULL DEFAULT 0')
 db.exec(`

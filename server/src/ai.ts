@@ -49,11 +49,11 @@ export function matchFaq(text: string): { id: number; title: string; body: strin
   return best
 }
 
-interface HistoryRow { from_me: number; type: string; body: string; sender_name: string | null; ai_auto: number }
+interface HistoryRow { from_me: number; type: string; body: string; sender_name: string | null; ai_auto: number; transcript: string | null }
 
 function transcript(conversationId: number) {
   const history = all<HistoryRow>(
-    `SELECT m.from_me, m.type, m.body, u.name AS sender_name, m.ai_auto
+    `SELECT m.from_me, m.type, m.body, u.name AS sender_name, m.ai_auto, m.transcript
      FROM messages m LEFT JOIN users u ON u.id = m.sender_id
      WHERE m.conversation_id = ? ORDER BY m.ts DESC LIMIT 30`,
     conversationId,
@@ -62,7 +62,7 @@ function transcript(conversationId: number) {
   return history
     .map((m) => {
       const who = !m.from_me ? 'Customer' : m.ai_auto ? 'Team (AI assistant)' : `Team (${m.sender_name ?? 'from phone'})`
-      return `${who}: ${m.body || `[${m.type}]`}`
+      return `${who}: ${m.transcript ? `[voice message] ${m.transcript}` : m.body || `[${m.type}]`}`
     })
     .join('\n')
 }

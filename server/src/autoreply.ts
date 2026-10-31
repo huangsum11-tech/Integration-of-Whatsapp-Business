@@ -11,6 +11,7 @@ import { sendReply } from './channels.js'
 import { all, get, getSetting, run } from './db.js'
 import { addEvent, getConversation, inboxEvents, previewOf, type MessageType } from './inbox.js'
 import { broadcast } from './realtime.js'
+import { canTranscribe } from './transcribe.js'
 
 export type ReplyMode = 'off' | 'suggest' | 'auto'
 
@@ -66,15 +67,24 @@ async function respond(conversationId: number) {
   if (mode === 'off' || (mode === 'auto' && conversation.ai_paused)) return
 
   // Everything the customer said since the team last replied.
-  const recent = all<{ id: number; from_me: number; type: MessageType; body: string }>(
-    'SELECT id, from_me, type, body FROM messages WHERE conversation_id = ? ORDER BY ts DESC, id DESC LIMIT 20', conversationId,
-  )
-  const pending = recent.slice(0, recent.findIndex((m) => m.from_me) === -1 ? recent.length : recent.findIndex((m) => m.from_me))
+  const load = () => {
+    const recent = all<{ id: number; from_me: number; type: MessageType; body: string; transcript: string | null }>(
+      'SELECT id, from_me, type, body, transcript FROM messages WHERE conversation_id = ? ORDER BY ts DESC, id DESC LIMIT 20', conversationId,
+    )
+    return recent.slice(0, recent.findIndex((m) => m.from_me) === -1 ? recent.length : recent.findIndex((m) => m.from_me))
+  }
+  let pending = load()
   if (pending.length === 0) return
+  // Give voice notes up to 30 seconds to download and be transcribed, so the AI can answer them.
+  const untranscribed = () => pending.some((m) => (m.type === 'voice' || m.type === 'audio') && !m.transcript)
+  for (let i = 0; i < 10 && canTranscribe() && untranscribed(); i++) {
+    await new Promise((r) => setTimeout(r, 3000))
+    pending = load()
+  }
   const latestId = pending[0].id
 
   let reply: CustomerReply
-  const nonText = pending.find((m) => m.type !== 'text')
+  const nonText = pending.find((m) => m.type !== 'text' && !m.transcript)
   const recentAuto = get<{ c: number }>(
     'SELECT COUNT(*) AS c FROM messages WHERE conversation_id = ? AND ai_auto = 1 AND ts > unixepoch() - 3600', conversationId,
   )!.c
@@ -85,7 +95,7 @@ async function respond(conversationId: number) {
     reply = { action: 'handoff', reason: '一小時內自動回覆次數已達上限' }
   } else {
     // An exact FAQ answer only fits when it's what the latest message asks; anything else goes to the AI.
-    const faq = matchFaq(pending[0].body)
+    const faq = matchFaq(pending[0].transcript ?? pending[0].body)
     reply = faq ? { action: 'reply', text: faq.body } : await customerReply(conversationId)
   }
 

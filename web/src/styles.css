@@ -333,6 +333,8 @@ h1, h2, h3 { font-family: var(--font-display); margin: 0; letter-spacing: -0.01e
 .demo-hint code { font-size: 12px; overflow-wrap: anywhere; }
 .human-banner { display: flex; align-items: center; gap: 8px; padding: 8px 20px; background: var(--coral-50); color: #b2432c; font-size: 13px; border-bottom: 1px solid #f3cfc5; }
 .composer-box { position: relative; }
+.transcript { display: flex; gap: 6px; align-items: flex-start; font-size: 13px; color: var(--muted); margin-top: 4px; white-space: pre-wrap; }
+.transcript svg { flex-shrink: 0; margin-top: 3px; }
 .tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag-x { border: 0; background: transparent; color: inherit; padding: 0; margin-left: 2px; display: inline-flex; cursor: pointer; }
 .quick-menu { position: absolute; left: 0; right: 56px; bottom: calc(100% + 6px); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); box-shadow: 0 6px 20px rgba(0,0,0,.1); z-index: 5; overflow: hidden; }

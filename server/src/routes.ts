@@ -6,7 +6,7 @@ import { teamAnalytics } from './analytics.js'
 import {
   SESSION_COOKIE, createSession, hashPassword, requireAdmin, requireUser, verifyPassword,
 } from './auth.js'
-import { canSend, sendReply } from './channels.js'
+import { canSend, sendReply, sendToPhone } from './channels.js'
 import { CONTACT_NAME_SQL, CONTACT_PHONE_SQL, all, get, getSetting, run, setSetting, tx } from './db.js'
 import { INSTRUCTOR_CHAT_SQL, addEvent, getConversation, getTimeline, listConversations } from './inbox.js'
 import { TEMPLATE_PATH, exportCsv, importCsv, importTemplate } from './knowledge.js'
@@ -19,6 +19,8 @@ import {
   DEFAULT_FOLLOWUP, automationSettings, recordTrial, saveAutomationSettings, trialsForContact, upcomingTrials, waitingCustomers,
 } from './automation.js'
 import { parseLocal } from './time.js'
+import { reportSettings, saveReportSettings, sendWeeklyReport, weeklyReport } from './report.js'
+import { canTranscribe } from './transcribe.js'
 import {
   SEGMENTS, allTags, audienceContacts, getCampaign, importContacts, listCampaigns, saveCampaign, sendCampaign, sendTest, setTags, tagsFor,
 } from './campaigns.js'
@@ -506,6 +508,9 @@ api.get('/automation', (_req, res) => {
     trials: upcomingTrials(),
     waiting: waitingCustomers(0).length,
     team: all("SELECT id, name, phone, active FROM users WHERE active = 1 ORDER BY name"),
+    report: reportSettings(),
+    review: { url: getSetting('google_review_url'), message: getSetting('review_message', DEFAULT_REVIEW) },
+    transcription: canTranscribe(),
   })
 })
 
@@ -525,6 +530,51 @@ api.put('/automation/settings', requireAdmin, (req, res) => {
   }), req)
   saveAutomationSettings(b)
   res.json(automationSettings())
+})
+
+api.put('/automation/report', requireAdmin, (req, res) => {
+  saveReportSettings(body(z.object({
+    report_enabled: z.boolean().optional(), report_phones: z.string().max(300).optional(),
+    report_weekday: z.number().int().min(0).max(6).optional(), report_hour: z.number().int().min(0).max(23).optional(),
+  }), req))
+  res.json(reportSettings())
+})
+
+api.get('/automation/report/preview', requireAdmin, (_req, res) => res.json({ text: weeklyReport() }))
+
+api.post('/automation/report/send', requireAdmin, async (_req, res) => {
+  try {
+    res.json({ sent: await sendWeeklyReport() })
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : '發送失敗' })
+  }
+})
+
+const DEFAULT_REVIEW = '{名稱} 多謝你今日嚟上堂！😊 如果你鍾意我哋嘅課堂，可唔可以幫我哋寫個 Google 評價？對我哋幫助好大🙏\n{連結}'
+
+api.put('/automation/review', requireAdmin, (req, res) => {
+  const b = body(z.object({ url: z.string().max(500), message: z.string().min(1).max(1000) }), req)
+  setSetting('google_review_url', b.url.trim())
+  setSetting('review_message', b.message)
+  res.json({ ok: true })
+})
+
+/** Ask this customer for a Google review, with the saved message and link. */
+api.post('/conversations/:id/review', async (req, res) => {
+  const id = Number(req.params.id)
+  const url = getSetting('google_review_url')
+  if (!url) return res.status(400).json({ error: '請先在「自動化」頁填寫 Google 評價連結' })
+  const conversation = getConversation(id)
+  if (!conversation) return res.status(404).json({ error: '找不到對話' })
+  const text = getSetting('review_message', DEFAULT_REVIEW)
+    .replaceAll('{名稱}', String(conversation.contact_name).split(/[\s(（]/)[0]).replaceAll('{連結}', url)
+  try {
+    await sendReply(id, text, { userId: req.user.id })
+    addEvent(id, req.user.id, 'review')
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : '發送失敗' })
+  }
 })
 
 api.patch('/users/:id/phone', requireAdmin, (req, res) => {
@@ -799,6 +849,27 @@ api.post('/payroll/runs/:id/rerender', requireAdmin, (req, res) => {
     }
   })
   res.json(getRun(id))
+})
+
+/** A notice to instructors (cover class, schedule change…), sent one by one from the payroll number. */
+api.post('/payroll/notify', requireAdmin, async (req, res) => {
+  const b = body(z.object({ message: z.string().trim().min(1).max(2000), ids: z.array(z.number().int()).min(1) }), req)
+  const numberId = payrollSettings().number_id
+  if (!numberId) return res.status(400).json({ error: '請先在「發送設定」選擇用哪個 WhatsApp 號碼發送' })
+  const results: { name: string; ok: boolean; error?: string }[] = []
+  for (const instructor of all<{ id: number; name: string; phone: string }>(
+    `SELECT id, name, phone FROM instructors WHERE active = 1 AND id IN (${b.ids.map(() => '?').join(',')})`, ...b.ids,
+  )) {
+    try {
+      if (!instructor.phone) throw new Error('未有電話')
+      await sendToPhone(numberId, instructor.phone, b.message.replaceAll('{導師}', instructor.name), { userId: req.user.id })
+      results.push({ name: instructor.name, ok: true })
+    } catch (err) {
+      results.push({ name: instructor.name, ok: false, error: err instanceof Error ? err.message : '發送失敗' })
+    }
+    await new Promise((r) => setTimeout(r, 1500))
+  }
+  res.json({ results })
 })
 
 api.delete('/payroll/runs/:id', requireAdmin, (req, res) => {
