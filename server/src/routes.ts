@@ -15,6 +15,10 @@ import {
   DEFAULT_TEMPLATE, analyzeReport, createRun, getRun, listRuns, payrollSettings, render, savePayrollSettings, sendRun,
 } from './payroll.js'
 import { normalizePhone } from './channels.js'
+import {
+  DEFAULT_FOLLOWUP, automationSettings, recordTrial, saveAutomationSettings, trialsForContact, upcomingTrials, waitingCustomers,
+} from './automation.js'
+import { parseLocal } from './time.js'
 import { handleWebhook, validSignature, verifyCloud, verifyInstagram } from './meta.js'
 import { broadcast } from './realtime.js'
 import { MEDIA_DIR, connectNumber, currentQr, disconnectNumber, isConnected, syncContacts } from './whatsapp.js'
@@ -74,10 +78,11 @@ api.use(requireUser)
 api.get('/me', (req, res) => res.json(req.user))
 
 api.patch('/me', (req, res) => {
-  const b = body(z.object({ name: z.string().min(1).optional(), style_notes: z.string().max(2000).optional() }), req)
+  const b = body(z.object({ name: z.string().min(1).optional(), style_notes: z.string().max(2000).optional(), phone: z.string().max(30).optional() }), req)
   if (b.name) run('UPDATE users SET name = ? WHERE id = ?', b.name, req.user.id)
   if (b.style_notes !== undefined) run('UPDATE users SET style_notes = ? WHERE id = ?', b.style_notes, req.user.id)
-  res.json(get('SELECT id, name, email, role, active, color, style_notes FROM users WHERE id = ?', req.user.id))
+  if (b.phone !== undefined) run('UPDATE users SET phone = ? WHERE id = ?', b.phone ? normalizePhone(b.phone) : '', req.user.id)
+  res.json(get('SELECT id, name, email, role, active, color, style_notes, phone FROM users WHERE id = ?', req.user.id))
 })
 
 // ---------- Team ----------
@@ -269,12 +274,13 @@ api.get('/conversations/:id', (req, res) => {
   if (!conversation || (req.user.role !== 'admin' && isInstructorChat(id))) return res.status(404).json({ error: '找不到對話' })
   const contact = getContact(conversation.contact_id)
   const deals = all('SELECT d.*, u.name AS user_name FROM deals d LEFT JOIN users u ON u.id = d.user_id WHERE d.contact_id = ? ORDER BY d.created_at DESC', conversation.contact_id)
+  const trials = trialsForContact(conversation.contact_id)
   const otherConversations = all(
     `SELECT c.id, c.last_message_at, c.last_preview, n.label AS number_label
      FROM conversations c JOIN numbers n ON n.id = c.number_id WHERE c.contact_id = ? AND c.id != ?`,
     conversation.contact_id, id,
   )
-  res.json({ conversation, contact, deals, otherConversations, timeline: getTimeline(id), canSend: canSend(conversation.number_id) })
+  res.json({ conversation, contact, deals, trials, otherConversations, timeline: getTimeline(id), canSend: canSend(conversation.number_id) })
 })
 
 function isInstructorChat(conversationId: number) {
@@ -375,6 +381,8 @@ api.get('/ai/settings', (_req, res) => {
     business_name: getSetting('business_name'),
     business_intro: getSetting('business_intro'),
     handoff_message: getSetting('handoff_message'),
+    trial_booking_url: getSetting('trial_booking_url'),
+    booking_url: getSetting('booking_url'),
   })
 })
 
@@ -385,11 +393,13 @@ api.put('/ai/settings', requireAdmin, (req, res) => {
     business_name: z.string().max(120).optional(),
     business_intro: z.string().max(4000).optional(),
     handoff_message: z.string().max(500).optional(),
+    trial_booking_url: z.string().max(500).optional(),
+    booking_url: z.string().max(500).optional(),
   }), req)
   tx(() => {
     if (b.provider) setSetting('ai_provider', b.provider)
     if (b.model !== undefined) setSetting(`ai_model_${b.provider ?? currentAi().provider}`, b.model.trim())
-    for (const key of ['business_name', 'business_intro', 'handoff_message'] as const) {
+    for (const key of ['business_name', 'business_intro', 'handoff_message', 'trial_booking_url', 'booking_url'] as const) {
       if (b[key] !== undefined) setSetting(key, b[key]!)
     }
   })
@@ -454,6 +464,92 @@ api.put('/knowledge/:id', requireAdmin, (req, res) => {
 
 api.delete('/knowledge/:id', requireAdmin, (req, res) => {
   run('DELETE FROM knowledge WHERE id = ?', Number(req.params.id))
+  res.json({ ok: true })
+})
+
+// ---------- Trials, follow-ups, alerts, quick replies ----------
+
+api.post('/conversations/:id/trials', (req, res) => {
+  const b = body(z.object({ at: z.string(), class_name: z.string().max(120).default('') }), req)
+  const at = parseLocal(b.at)
+  if (!at) return res.status(400).json({ error: '日期時間格式不正確' })
+  res.json({ id: recordTrial(Number(req.params.id), at, b.class_name, 'staff', req.user.id) })
+})
+
+api.patch('/trials/:id', (req, res) => {
+  const b = body(z.object({
+    at: z.string().optional(), class_name: z.string().max(120).optional(),
+    status: z.enum(['booked', 'cancelled']).optional(), followup: z.enum(['pending', 'skipped']).optional(),
+  }), req)
+  const id = Number(req.params.id)
+  if (b.at) {
+    const at = parseLocal(b.at)
+    if (!at) return res.status(400).json({ error: '日期時間格式不正確' })
+    // A new time means a new follow-up.
+    run("UPDATE trials SET class_at = ?, followup_status = 'pending', followup_error = NULL WHERE id = ?", at, id)
+  }
+  if (b.class_name !== undefined) run('UPDATE trials SET class_name = ? WHERE id = ?', b.class_name, id)
+  if (b.status) run('UPDATE trials SET status = ? WHERE id = ?', b.status, id)
+  if (b.followup) run('UPDATE trials SET followup_status = ?, followup_error = NULL WHERE id = ?', b.followup, id)
+  broadcast('trial', {})
+  res.json({ ok: true })
+})
+
+api.get('/automation', (_req, res) => {
+  res.json({
+    settings: automationSettings(),
+    defaultFollowup: DEFAULT_FOLLOWUP,
+    trials: upcomingTrials(),
+    waiting: waitingCustomers(0).length,
+    team: all("SELECT id, name, phone, active FROM users WHERE active = 1 ORDER BY name"),
+  })
+})
+
+api.put('/automation/settings', requireAdmin, (req, res) => {
+  const b = body(z.object({
+    notify_number_id: z.number().int().nullable().optional(),
+    followup_enabled: z.boolean().optional(),
+    followup_minutes: z.number().int().min(0).max(24 * 60).optional(),
+    followup_message: z.string().min(1).max(2000).optional(),
+    followup_wa_template_name: z.string().max(200).optional(),
+    followup_wa_template_language: z.string().max(20).optional(),
+    alert_enabled: z.boolean().optional(),
+    alert_minutes: z.number().int().min(1).max(24 * 60).optional(),
+    alert_phone: z.string().max(30).optional(),
+    alert_from_hour: z.number().int().min(0).max(23).optional(),
+    alert_to_hour: z.number().int().min(1).max(24).optional(),
+  }), req)
+  saveAutomationSettings(b)
+  res.json(automationSettings())
+})
+
+api.patch('/users/:id/phone', requireAdmin, (req, res) => {
+  const { phone } = body(z.object({ phone: z.string().max(30) }), req)
+  run('UPDATE users SET phone = ? WHERE id = ?', phone ? normalizePhone(phone) : '', Number(req.params.id))
+  res.json({ ok: true })
+})
+
+api.get('/quick-replies', (_req, res) => {
+  res.json(all('SELECT * FROM quick_replies ORDER BY shortcut'))
+})
+
+const quickReply = z.object({ shortcut: z.string().trim().min(1).max(30).regex(/^[^\s/]+$/, '捷徑不可以有空格或 /'), body: z.string().min(1).max(4000) })
+
+api.post('/quick-replies', requireAdmin, (req, res) => {
+  const b = body(quickReply, req)
+  if (get('SELECT id FROM quick_replies WHERE shortcut = ?', b.shortcut)) return res.status(409).json({ error: '已有同名捷徑' })
+  run('INSERT INTO quick_replies (shortcut, body) VALUES (?, ?)', b.shortcut, b.body)
+  res.json({ ok: true })
+})
+
+api.put('/quick-replies/:id', requireAdmin, (req, res) => {
+  const b = body(quickReply, req)
+  run('UPDATE quick_replies SET shortcut = ?, body = ? WHERE id = ?', b.shortcut, b.body, Number(req.params.id))
+  res.json({ ok: true })
+})
+
+api.delete('/quick-replies/:id', requireAdmin, (req, res) => {
+  run('DELETE FROM quick_replies WHERE id = ?', Number(req.params.id))
   res.json({ ok: true })
 })
 

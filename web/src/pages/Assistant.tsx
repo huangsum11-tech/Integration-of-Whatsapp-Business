@@ -125,9 +125,13 @@ export default function Assistant() {
 }
 
 function BusinessCard({ settings, isAdmin, onSaved }: { settings: AiSettings; isAdmin: boolean; onSaved: () => void }) {
-  const [form, setForm] = useState({ business_name: settings.business_name, business_intro: settings.business_intro, handoff_message: settings.handoff_message })
+  const pick = (s: AiSettings) => ({
+    business_name: s.business_name, business_intro: s.business_intro, handoff_message: s.handoff_message,
+    trial_booking_url: s.trial_booking_url, booking_url: s.booking_url,
+  })
+  const [form, setForm] = useState(pick(settings))
   const [saved, setSaved] = useState(false)
-  const dirty = form.business_name !== settings.business_name || form.business_intro !== settings.business_intro || form.handoff_message !== settings.handoff_message
+  const dirty = JSON.stringify(form) !== JSON.stringify(pick(settings))
   const save = async () => {
     await api('/ai/settings', { method: 'PUT', body: form })
     setSaved(true); onSaved(); setTimeout(() => setSaved(false), 2000)
@@ -152,6 +156,18 @@ function BusinessCard({ settings, isAdmin, onSaved }: { settings: AiSettings; is
           <input id="biz-handoff" className="input" disabled={!isAdmin} value={form.handoff_message}
             placeholder="例如：收到！我已經通知同事，佢哋會盡快回覆你 🙏"
             onChange={(e) => setForm({ ...form, handoff_message: e.target.value })} />
+        </div>
+        <div>
+          <label className="label" htmlFor="biz-trial">首次試堂預約連結（AI 只會給第一次上堂的新客人）</label>
+          <input id="biz-trial" className="input" type="url" disabled={!isAdmin} value={form.trial_booking_url}
+            placeholder="例如 Vibefam 試堂 / Intro Offer 的預約頁面網址"
+            onChange={(e) => setForm({ ...form, trial_booking_url: e.target.value.trim() })} />
+        </div>
+        <div>
+          <label className="label" htmlFor="biz-booking">一般預約連結（已上過堂的學生自己預約）</label>
+          <input id="biz-booking" className="input" type="url" disabled={!isAdmin} value={form.booking_url}
+            placeholder="例如 Vibefam 時間表／App 下載頁"
+            onChange={(e) => setForm({ ...form, booking_url: e.target.value.trim() })} />
         </div>
         {isAdmin && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>
@@ -205,7 +221,7 @@ function ModelCard({ settings, isAdmin, onSaved }: { settings: AiSettings; isAdm
 function TestCard() {
   const [question, setQuestion] = useState('')
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<{ action: 'reply' | 'handoff'; text?: string; reason?: string; source: 'faq' | 'ai' } | null>(null)
+  const [result, setResult] = useState<{ action: 'reply' | 'handoff'; text?: string; reason?: string; source: 'faq' | 'ai'; trial?: { at: number; className: string } } | null>(null)
   const [error, setError] = useState('')
   const ask = async () => {
     if (!question.trim()) return
@@ -235,6 +251,12 @@ function TestCard() {
             <span className={`chip ${result.source === 'faq' ? 'pine' : 'iris'}`}>
               {result.source === 'faq' ? '常見問題：按關鍵字直接回覆（不經 AI）' : 'AI 根據知識庫回覆'}
             </span>
+            {result.trial && (
+              <span className="chip pine">
+                <Icon name="clock" size={12} />
+                會記錄試堂：{new Date(result.trial.at * 1000).toLocaleString('zh-HK', { dateStyle: 'medium', timeStyle: 'short' })} {result.trial.className}
+              </span>
+            )}
           </div>
         ) : (
           <div className="test-answer handoff">

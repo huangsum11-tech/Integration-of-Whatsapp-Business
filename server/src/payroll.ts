@@ -8,8 +8,8 @@ import { normalizePhone, sendToPhone } from './channels.js'
 import { all, get, getSetting, run, setSetting, tx } from './db.js'
 import { parseCsv } from './knowledge.js'
 import { broadcast } from './realtime.js'
+import { localParts } from './time.js'
 
-export const TIME_ZONE = process.env.BATON_TZ ?? 'Asia/Hong_Kong'
 /** Pause between payslips, so a burst of messages doesn't look like spam to WhatsApp. */
 const SEND_GAP_MS = Number(process.env.BATON_PAYROLL_GAP_MS ?? 3000)
 
@@ -205,14 +205,6 @@ export async function sendRun(runId: number) {
 }
 
 // ---------- Schedule & month-end reminder ----------
-
-function localParts(date = new Date()) {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' })
-      .formatToParts(date).map((p) => [p.type, p.value]),
-  )
-  return { year: Number(parts.year), month: Number(parts.month), day: Number(parts.day), hour: Number(parts.hour) }
-}
 
 async function tick() {
   for (const due of all<{ id: number }>("SELECT id FROM payroll_runs WHERE status = 'scheduled' AND scheduled_at <= unixepoch()")) {

@@ -6,6 +6,7 @@
  *   quiet in that conversation until someone resumes it or the conversation is closed.
  */
 import { customerReply, matchFaq, type CustomerReply } from './ai.js'
+import { recordTrial } from './automation.js'
 import { sendReply } from './channels.js'
 import { all, get, getSetting, run } from './db.js'
 import { addEvent, getConversation, inboxEvents, previewOf, type MessageType } from './inbox.js'
@@ -107,5 +108,7 @@ async function respond(conversationId: number) {
     const holding = getSetting('handoff_message').trim()
     if (holding) await sendReply(conversationId, holding, { userId: null, aiAuto: true })
   }
+  // The customer told the AI when their trial class is: remember it for the follow-up.
+  if (reply.action === 'reply' && reply.trial) recordTrial(conversationId, reply.trial.at, reply.trial.className, 'ai', null)
   broadcast('conversation', getConversation(conversationId))
 }

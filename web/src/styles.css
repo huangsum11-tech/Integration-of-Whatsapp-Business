@@ -331,6 +331,11 @@ h1, h2, h3 { font-family: var(--font-display); margin: 0; letter-spacing: -0.01e
 .channel-option .icon { color: var(--pine); flex-shrink: 0; margin-top: 2px; }
 .demo-hint code { font-size: 12px; overflow-wrap: anywhere; }
 .human-banner { display: flex; align-items: center; gap: 8px; padding: 8px 20px; background: var(--coral-50); color: #b2432c; font-size: 13px; border-bottom: 1px solid #f3cfc5; }
+.composer-box { position: relative; }
+.quick-menu { position: absolute; left: 0; right: 56px; bottom: calc(100% + 6px); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); box-shadow: 0 6px 20px rgba(0,0,0,.1); z-index: 5; overflow: hidden; }
+.quick-item { display: flex; gap: 10px; width: 100%; text-align: left; border: 0; background: transparent; padding: 8px 12px; font-size: 13px; }
+.quick-item:hover, .quick-item:first-child { background: var(--pine-50); }
+.quick-item span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .suggestion { border: 1px solid #d9d4fb; background: var(--iris-50); border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 6px; }
 .suggestion-head { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: #4b3dc4; }
 .suggestion-text { font-size: 14px; white-space: pre-wrap; max-height: 120px; overflow-y: auto; }
@@ -356,3 +361,7 @@ h1, h2, h3 { font-family: var(--font-display); margin: 0; letter-spacing: -0.01e
 .instructor .input { width: 150px; padding: 4px 8px; }
 .instructor.off .name { color: var(--faint); text-decoration: line-through; }
 .kb-tools code { background: var(--paper); border-radius: 4px; padding: 0 4px; }
+
+/* ---------- Automation ---------- */
+fieldset.form-stack { border: 0; margin: 0; padding: 0; min-width: 0; }
+.toggle-row { display: flex; align-items: center; gap: 8px; font-size: 14px; }

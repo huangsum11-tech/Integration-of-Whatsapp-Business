@@ -82,4 +82,14 @@ export interface AiSettings {
   provider: string; model: string
   providers: { id: string; label: string; keyEnv: string; hasKey: boolean; defaultModel: string; model: string }[]
   business_name: string; business_intro: string; handoff_message: string
+  trial_booking_url: string; booking_url: string
 }
+
+export interface Trial {
+  id: number; contact_id: number; conversation_id: number | null; class_at: number; class_name: string
+  source: 'ai' | 'staff'; status: 'booked' | 'cancelled'
+  followup_status: 'pending' | 'sent' | 'failed' | 'skipped'; followup_error: string | null; followup_at: number | null
+  contact_name?: string
+}
+
+export interface QuickReply { id: number; shortcut: string; body: string }

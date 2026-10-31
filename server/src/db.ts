@@ -164,6 +164,10 @@ if (!columns('conversations').includes('ai_paused')) db.exec('ALTER TABLE conver
 if (!columns('conversations').includes('ai_suggestion')) db.exec('ALTER TABLE conversations ADD COLUMN ai_suggestion TEXT')
 // The AI handed this conversation to the team and no teammate has replied yet ("待人工" queue).
 if (!columns('conversations').includes('needs_human')) db.exec('ALTER TABLE conversations ADD COLUMN needs_human INTEGER NOT NULL DEFAULT 0')
+// When the team was last alerted that this customer is waiting for a reply.
+if (!columns('conversations').includes('human_alert_at')) db.exec('ALTER TABLE conversations ADD COLUMN human_alert_at INTEGER')
+// Teammate's own WhatsApp number, for "customer waiting" alerts.
+if (!columns('users').includes('phone')) db.exec("ALTER TABLE users ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
 // Sent by the AI on its own, with no teammate reviewing it.
 if (!columns('messages').includes('ai_auto')) db.exec('ALTER TABLE messages ADD COLUMN ai_auto INTEGER NOT NULL DEFAULT 0')
 db.exec(`
@@ -179,6 +183,31 @@ CREATE TABLE IF NOT EXISTS knowledge (
   updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
+-- Trial classes: booked by the customer (noted by the AI) or entered by a teammate.
+-- A follow-up message goes out a set time after the class starts.
+CREATE TABLE IF NOT EXISTS trials (
+  id INTEGER PRIMARY KEY,
+  contact_id INTEGER NOT NULL REFERENCES contacts(id),
+  conversation_id INTEGER REFERENCES conversations(id),
+  class_at INTEGER NOT NULL,
+  class_name TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT 'staff' CHECK (source IN ('ai','staff')),
+  status TEXT NOT NULL DEFAULT 'booked' CHECK (status IN ('booked','cancelled')),
+  followup_status TEXT NOT NULL DEFAULT 'pending' CHECK (followup_status IN ('pending','sent','failed','skipped')),
+  followup_error TEXT,
+  followup_at INTEGER,
+  created_by INTEGER REFERENCES users(id),
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS trials_due ON trials (status, followup_status, class_at);
+
+-- Staff shortcuts: typing "/價錢" in the composer inserts the saved text.
+CREATE TABLE IF NOT EXISTS quick_replies (
+  id INTEGER PRIMARY KEY,
+  shortcut TEXT NOT NULL UNIQUE,
+  body TEXT NOT NULL
+);
 
 -- Instructors who receive a monthly payslip. name must match the name in the Vibefam report.
 CREATE TABLE IF NOT EXISTS instructors (

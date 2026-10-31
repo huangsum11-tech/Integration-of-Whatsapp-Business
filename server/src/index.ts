@@ -12,6 +12,7 @@ import { ZodError } from 'zod'
 import { SESSION_COOKIE, userForToken } from './auth.js'
 import { setIo } from './realtime.js'
 import './autoreply.js'
+import { startAutomation } from './automation.js'
 import { startPayrollScheduler } from './payroll.js'
 import { api, media, webhooks } from './routes.js'
 import { restoreAll } from './whatsapp.js'
@@ -34,7 +35,11 @@ if (fs.existsSync(webDist)) {
 }
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  if (err instanceof ZodError) return res.status(400).json({ error: '資料格式不正確', issues: err.issues })
+  if (err instanceof ZodError) {
+    // Our own messages are in Chinese; zod's built-in ones are not shown to staff.
+    const own = err.issues.find((i) => /[\u4e00-\u9fff]/.test(i.message))?.message
+    return res.status(400).json({ error: own ?? '資料格式不正確', issues: err.issues })
+  }
   const status = (err as { status?: number }).status
   if (status === 404) return res.status(404).json({ error: '找不到' })
   console.error(err)
@@ -80,4 +85,5 @@ server.listen(PORT, async () => {
   }
   restoreAll().catch((err) => console.error('Failed to restore WhatsApp sessions', err))
   startPayrollScheduler()
+  startAutomation()
 })

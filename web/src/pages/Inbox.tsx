@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { api, type Contact, type Conversation, type Deal, type InboxEvent, type Message } from '../api'
+import { api, type Contact, type Conversation, type Deal, type InboxEvent, type Message, type QuickReply, type Trial } from '../api'
 import { useApp } from '../App'
 import { Avatar, Icon, Modal } from '../components'
 import { clock, dayLabel, formatPhone, money, timeLabel } from '../format'
@@ -18,6 +18,7 @@ interface Detail {
   conversation: Conversation
   contact: Contact
   deals: Deal[]
+  trials: Trial[]
   otherConversations: { id: number; last_message_at: number; last_preview: string; number_label: string }[]
   timeline: (Message | InboxEvent)[]
   canSend: boolean
@@ -203,7 +204,16 @@ function Thread({ detail }: { detail: Detail }) {
     }
   }
 
+  // Quick replies: typing "/" followed by a shortcut, e.g. "/價錢".
+  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([])
+  useEffect(() => { api<QuickReply[]>('/quick-replies').then(setQuickReplies) }, [])
+  const quickQuery = mode === 'reply' && /^\/[^\s]*$/.test(text) ? text.slice(1).toLowerCase() : null
+  const quickMatches = quickQuery === null ? [] : quickReplies.filter((q) => q.shortcut.toLowerCase().includes(quickQuery)).slice(0, 6)
+  const firstName = conversation.contact_name.split(/[\s(（]/)[0]
+  const useQuick = (q: QuickReply) => { setText(q.body.replaceAll('{名稱}', firstName)); setAiDraft(false) }
+
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.key === 'Enter' || e.key === 'Tab') && quickMatches.length && !e.nativeEvent.isComposing) { e.preventDefault(); useQuick(quickMatches[0]); return }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send() }
   }
 
@@ -285,8 +295,17 @@ function Thread({ detail }: { detail: Detail }) {
           </div>
         )}
         <div className="composer-box">
+          {quickMatches.length > 0 && (
+            <div className="quick-menu" role="listbox" aria-label="快速回覆">
+              {quickMatches.map((q) => (
+                <button key={q.id} role="option" className="quick-item" onMouseDown={(e) => { e.preventDefault(); useQuick(q) }}>
+                  <b>/{q.shortcut}</b><span>{q.body}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <textarea className="textarea" rows={2} value={text} onKeyDown={onKey}
-            placeholder={mode === 'note' ? '寫下只有同事看到的備註…' : canSend ? '輸入訊息，Enter 發送，Shift+Enter 換行' : '此號碼未連接，暫時不能發送'}
+            placeholder={mode === 'note' ? '寫下只有同事看到的備註…' : canSend ? '輸入訊息，Enter 發送，Shift+Enter 換行，/ 快速回覆' : '此號碼未連接，暫時不能發送'}
             disabled={mode === 'reply' && !canSend}
             onChange={(e) => setText(e.target.value)} />
           <button className="btn primary" onClick={send} disabled={sending || !text.trim() || (mode === 'reply' && !canSend)} aria-label="發送" style={{ height: 44 }}>
@@ -363,6 +382,7 @@ function EventLine({ e }: { e: InboxEvent }) {
     ai_paused: e.user_id ? `${who} 暫停了 AI 自動回覆` : 'AI 自動回覆已暫停',
     ai_resumed: `${who} 恢復了 AI 自動回覆`,
     ai_error: 'AI 回覆失敗',
+    trial: e.user_id ? `${who} 記錄了試堂` : 'AI 記錄了試堂',
   }
   return (
     <div className={`event ${e.kind === 'handoff' || e.kind === 'offboard' || e.kind === 'ai_handoff' || e.kind === 'ai_error' ? 'handoff' : ''}`}>
@@ -466,6 +486,8 @@ function SidePanel({ detail, reload }: { detail: Detail; reload: () => void }) {
           onBlur={() => notes !== contact.notes && saveContact({ notes })} placeholder="喜好、地址、注意事項…全公司共用" />
       </div>
 
+      <TrialSection detail={detail} reload={reload} />
+
       <div className="side-section">
         <h3>成交紀錄</h3>
         {deals.length === 0 && <div className="faint" style={{ fontSize: 13 }}>未有紀錄</div>}
@@ -492,5 +514,67 @@ function SidePanel({ detail, reload }: { detail: Detail; reload: () => void }) {
         </div>
       </div>
     </aside>
+  )
+}
+
+const FOLLOWUP_LABEL: Record<Trial['followup_status'], [string, string]> = {
+  pending: ['', '待跟進'], sent: ['pine', '已跟進'], failed: ['coral', '跟進失敗'], skipped: ['', '不跟進'],
+}
+
+function TrialSection({ detail, reload }: { detail: Detail; reload: () => void }) {
+  const [at, setAt] = useState('')
+  const [name, setName] = useState('')
+  const [error, setError] = useState('')
+  useEffect(() => {
+    const socket = getSocket()
+    socket.on('trial', reload)
+    return () => { socket.off('trial', reload) }
+  }, [reload])
+  const add = async () => {
+    setError('')
+    try {
+      await api(`/conversations/${detail.conversation.id}/trials`, { body: { at: at.replace('T', ' '), class_name: name } })
+      setAt(''); setName(''); reload()
+    } catch (err) { setError(err instanceof Error ? err.message : '未能記錄') }
+  }
+  const patch = (t: Trial, body: Record<string, unknown>) => api(`/trials/${t.id}`, { method: 'PATCH', body }).then(reload)
+
+  return (
+    <div className="side-section">
+      <h3>試堂</h3>
+      {detail.trials.length === 0 && <div className="faint" style={{ fontSize: 13 }}>未有試堂紀錄。客人告訴 AI 試堂時間後會自動記錄。</div>}
+      {detail.trials.map((t) => {
+        const [tone, label] = FOLLOWUP_LABEL[t.followup_status]
+        return (
+          <div className="deal" key={t.id} style={{ alignItems: 'flex-start' }}>
+            <div className="title">
+              <div style={{ textDecoration: t.status === 'cancelled' ? 'line-through' : undefined }}>
+                {new Date(t.class_at * 1000).toLocaleString('zh-HK', { month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false })} {t.class_name}
+              </div>
+              <div className="faint" style={{ fontSize: 12 }}>
+                {t.source === 'ai' ? 'AI 記錄' : '同事記錄'}
+                {t.status === 'booked' && <> · <span className={`chip ${tone}`} style={{ fontSize: 11, padding: '0 6px' }}>{label}</span></>}
+              </div>
+              {t.followup_status === 'failed' && t.followup_error && <div className="error" style={{ fontSize: 12 }}>{t.followup_error}</div>}
+            </div>
+            {t.status === 'booked' && t.followup_status !== 'sent' && (
+              <button className="btn sm" title={t.followup_status === 'skipped' ? '恢復跟進' : '不需要跟進'}
+                onClick={() => patch(t, { followup: t.followup_status === 'skipped' ? 'pending' : 'skipped' })}>
+                <Icon name={t.followup_status === 'skipped' ? 'play' : 'pause'} size={13} />
+              </button>
+            )}
+            <button className="btn sm" title={t.status === 'booked' ? '取消試堂' : '恢復'} onClick={() => patch(t, { status: t.status === 'booked' ? 'cancelled' : 'booked' })}>
+              <Icon name={t.status === 'booked' ? 'x' : 'check'} size={13} />
+            </button>
+          </div>
+        )
+      })}
+      <div className="inline-form">
+        <input className="input" type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} aria-label="試堂時間" style={{ flex: 2, minWidth: 0 }} />
+        <input className="input" placeholder="課堂" value={name} onChange={(e) => setName(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
+        <button className="btn sm" disabled={!at} onClick={add} aria-label="記錄試堂"><Icon name="plus" size={15} /></button>
+      </div>
+      {error && <div className="error" style={{ fontSize: 12 }}>{error}</div>}
+    </div>
   )
 }

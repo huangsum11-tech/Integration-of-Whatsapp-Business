@@ -4,6 +4,7 @@ import { Icon, Logo, type IconName } from './components'
 import { closeSocket, getSocket } from './socket'
 import Analytics from './pages/Analytics'
 import Assistant from './pages/Assistant'
+import Automation from './pages/Automation'
 import Contacts from './pages/Contacts'
 import Inbox from './pages/Inbox'
 import Numbers from './pages/Numbers'
@@ -27,6 +28,7 @@ const ROUTES: { path: string; label: string; icon: IconName; admin?: boolean }[]
   { path: 'contacts', label: '聯絡簿', icon: 'contacts' },
   { path: 'analytics', label: '分析', icon: 'chart' },
   { path: 'ai', label: 'AI 助手', icon: 'sparkle' },
+  { path: 'automation', label: '自動化', icon: 'clock' },
   { path: 'payroll', label: '糧單', icon: 'wallet', admin: true },
   { path: 'numbers', label: '號碼', icon: 'phone' },
   { path: 'team', label: '團隊', icon: 'team' },
@@ -112,6 +114,7 @@ function Shell({ me, setMe, onLogout }: { me: User; setMe: (u: User) => void; on
           {page === 'contacts' && <Contacts />}
           {page === 'analytics' && <Analytics />}
           {page === 'ai' && <Assistant />}
+          {page === 'automation' && <Automation />}
           {page === 'payroll' && <Payroll />}
           {page === 'numbers' && <Numbers />}
           {page === 'team' && <Team />}
