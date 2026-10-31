@@ -9,6 +9,7 @@ import {
 import { canSend, sendReply } from './channels.js'
 import { CONTACT_NAME_SQL, CONTACT_PHONE_SQL, all, get, getSetting, run, setSetting, tx } from './db.js'
 import { addEvent, getConversation, getTimeline, listConversations } from './inbox.js'
+import { TEMPLATE_PATH, exportCsv, importCsv, importTemplate } from './knowledge.js'
 import { PROVIDERS, currentAi, hasKey, type Provider } from './llm.js'
 import { handleWebhook, validSignature, verifyCloud, verifyInstagram } from './meta.js'
 import { broadcast } from './realtime.js'
@@ -249,7 +250,8 @@ api.get('/conversations/counts', (req, res) => {
        SUM(status = 'open') AS "all",
        SUM(status = 'open' AND assignee_id = ?) AS mine,
        SUM(status = 'open' AND assignee_id IS NULL) AS unassigned,
-       SUM(status = 'closed') AS closed
+       SUM(status = 'closed') AS closed,
+       SUM(status = 'open' AND needs_human = 1) AS human
      FROM conversations`,
     req.user.id,
   ))
@@ -282,7 +284,8 @@ api.patch('/conversations/:id', (req, res) => {
   // Closing ends the human takeover: the AI handles this customer's next question again.
   run(`UPDATE conversations SET status = ?1,
          ai_paused = CASE WHEN ?1 = 'closed' THEN 0 ELSE ai_paused END,
-         ai_suggestion = CASE WHEN ?1 = 'closed' THEN NULL ELSE ai_suggestion END
+         ai_suggestion = CASE WHEN ?1 = 'closed' THEN NULL ELSE ai_suggestion END,
+         needs_human = CASE WHEN ?1 = 'closed' THEN 0 ELSE needs_human END
        WHERE id = ?2`, status, id)
   addEvent(id, req.user.id, status === 'closed' ? 'close' : 'reopen')
   broadcast('conversation', getConversation(id))
@@ -403,6 +406,25 @@ const knowledgeEntry = z.object({
 
 api.get('/knowledge', (_req, res) => {
   res.json(all('SELECT * FROM knowledge ORDER BY category, id'))
+})
+
+/** The whole knowledge base as a spreadsheet (opens in Excel / Google Sheets). */
+api.get('/knowledge/export.csv', (_req, res) => {
+  res.attachment('baton-knowledge.csv').type('text/csv; charset=utf-8').send(exportCsv())
+})
+
+/** The blank Pilates / fitness studio template to fill in. */
+api.get('/knowledge/template.csv', (_req, res) => {
+  res.attachment('knowledge-template.csv').type('text/csv; charset=utf-8').sendFile(TEMPLATE_PATH)
+})
+
+api.post('/knowledge/import', requireAdmin, (req, res) => {
+  const b = body(z.object({ csv: z.string().min(1).max(900_000).optional(), template: z.boolean().optional(), replace: z.boolean().default(false) }), req)
+  try {
+    res.json(b.template ? importTemplate() : importCsv(b.csv ?? '', b.replace))
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : '匯入失敗' })
+  }
 })
 
 api.post('/knowledge', requireAdmin, (req, res) => {

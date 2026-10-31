@@ -219,7 +219,7 @@ export function setMessageMedia(numberId: number, waId: string, mediaPath: strin
 
 const CONVERSATION_SELECT = `
   SELECT c.id, c.number_id, c.contact_id, c.jid, c.assignee_id, c.status, c.unread,
-         c.last_message_at, c.last_preview, c.ai_paused, c.ai_suggestion,
+         c.last_message_at, c.last_preview, c.ai_paused, c.ai_suggestion, c.needs_human,
          ${CONTACT_PHONE_SQL} AS phone, ${CONTACT_NAME_SQL} AS contact_name,
          n.label AS number_label, n.phone AS number_phone, n.channel, n.reply_mode
   FROM conversations c
@@ -239,6 +239,7 @@ export function listConversations(filter: {
   else if (filter.view === 'mine') { where.push("c.assignee_id = ? AND c.status = 'open'"); params.push(filter.userId) }
   else if (filter.view === 'unassigned') where.push("c.assignee_id IS NULL AND c.status = 'open'")
   else if (filter.view === 'closed') where.push("c.status = 'closed'")
+  else if (filter.view === 'human') where.push("c.needs_human = 1 AND c.status = 'open'")
   else where.push("c.status = 'open'")
   if (filter.numberId) { where.push('c.number_id = ?'); params.push(filter.numberId) }
   if (filter.q) {

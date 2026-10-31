@@ -3,6 +3,7 @@
  * Run: npm run seed  (refuses to touch a database that already has users)
  * Demo login: karen@baton.demo / baton-demo
  */
+import './env.js'
 import { hashPassword } from './auth.js'
 import { get, run, setSetting, tx } from './db.js'
 import { addEvent, storeMessage } from './inbox.js'

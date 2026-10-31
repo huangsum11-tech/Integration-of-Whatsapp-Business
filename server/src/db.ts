@@ -162,6 +162,8 @@ if (!columns('numbers').includes('reply_mode')) db.exec("ALTER TABLE numbers ADD
 if (!columns('conversations').includes('ai_paused')) db.exec('ALTER TABLE conversations ADD COLUMN ai_paused INTEGER NOT NULL DEFAULT 0')
 // The AI's suggested reply waiting for a teammate (reply mode 'suggest').
 if (!columns('conversations').includes('ai_suggestion')) db.exec('ALTER TABLE conversations ADD COLUMN ai_suggestion TEXT')
+// The AI handed this conversation to the team and no teammate has replied yet ("待人工" queue).
+if (!columns('conversations').includes('needs_human')) db.exec('ALTER TABLE conversations ADD COLUMN needs_human INTEGER NOT NULL DEFAULT 0')
 // Sent by the AI on its own, with no teammate reviewing it.
 if (!columns('messages').includes('ai_auto')) db.exec('ALTER TABLE messages ADD COLUMN ai_auto INTEGER NOT NULL DEFAULT 0')
 db.exec(`

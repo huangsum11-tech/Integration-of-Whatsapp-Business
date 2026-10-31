@@ -45,11 +45,14 @@ inboxEvents.on('team-message', ({ conversationId, numberId, messageId }: Message
     if (!m || m.ai_auto) return
     clearTimeout(timers.get(conversationId))
     timers.delete(conversationId)
-    const c = get<{ ai_paused: number; ai_suggestion: string | null }>('SELECT ai_paused, ai_suggestion FROM conversations WHERE id = ?', conversationId)
+    const c = get<{ ai_paused: number; ai_suggestion: string | null; needs_human: number }>(
+      'SELECT ai_paused, ai_suggestion, needs_human FROM conversations WHERE id = ?', conversationId,
+    )
     if (!c) return
     const pause = replyMode(numberId) === 'auto' && !c.ai_paused
-    if (!pause && c.ai_suggestion === null) return
-    run('UPDATE conversations SET ai_suggestion = NULL, ai_paused = CASE WHEN ? THEN 1 ELSE ai_paused END WHERE id = ?', pause ? 1 : 0, conversationId)
+    if (!pause && c.ai_suggestion === null && !c.needs_human) return
+    // A person answered: the suggestion is stale and the conversation leaves the "待人工" queue.
+    run('UPDATE conversations SET ai_suggestion = NULL, needs_human = 0, ai_paused = CASE WHEN ? THEN 1 ELSE ai_paused END WHERE id = ?', pause ? 1 : 0, conversationId)
     if (pause) addEvent(conversationId, null, 'ai_paused', '同事已接手')
     broadcast('conversation', getConversation(conversationId))
   }, 3000)
@@ -93,12 +96,13 @@ async function respond(conversationId: number) {
   if (!now || now.latest !== latestId || (mode === 'auto' && now.ai_paused)) return
 
   if (mode === 'suggest') {
-    run('UPDATE conversations SET ai_suggestion = ? WHERE id = ?', reply.action === 'reply' ? reply.text : null, conversationId)
+    run('UPDATE conversations SET ai_suggestion = ?, needs_human = ? WHERE id = ?',
+      reply.action === 'reply' ? reply.text : null, reply.action === 'handoff' ? 1 : 0, conversationId)
     if (reply.action === 'handoff') addEvent(conversationId, null, 'ai_handoff', reply.reason)
   } else if (reply.action === 'reply') {
     await sendReply(conversationId, reply.text, { userId: null, aiAuto: true })
   } else {
-    run('UPDATE conversations SET ai_paused = 1 WHERE id = ?', conversationId)
+    run('UPDATE conversations SET ai_paused = 1, needs_human = 1 WHERE id = ?', conversationId)
     addEvent(conversationId, null, 'ai_handoff', reply.reason)
     const holding = getSetting('handoff_message').trim()
     if (holding) await sendReply(conversationId, holding, { userId: null, aiAuto: true })

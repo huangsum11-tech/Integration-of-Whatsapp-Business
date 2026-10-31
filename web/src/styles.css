@@ -310,6 +310,8 @@ h1, h2, h3 { font-family: var(--font-display); margin: 0; letter-spacing: -0.01e
 .ai-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .ai-card-head h2 { font-size: 16px; display: flex; align-items: center; gap: 8px; }
 .form-stack { display: flex; flex-direction: column; gap: 12px; }
+.kb-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: -4px 0 10px; font-size: 12px; }
+.kb-tools .btn { text-decoration: none; cursor: pointer; color: var(--text); }
 .kb-list { display: flex; flex-direction: column; gap: 8px; }
 .kb-item { text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius-sm); padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
 .kb-item:not(:disabled):hover { border-color: var(--pine); }
@@ -328,6 +330,7 @@ h1, h2, h3 { font-family: var(--font-display); margin: 0; letter-spacing: -0.01e
 .channel-option:hover { border-color: var(--pine); background: var(--pine-50); }
 .channel-option .icon { color: var(--pine); flex-shrink: 0; margin-top: 2px; }
 .demo-hint code { font-size: 12px; overflow-wrap: anywhere; }
+.human-banner { display: flex; align-items: center; gap: 8px; padding: 8px 20px; background: var(--coral-50); color: #b2432c; font-size: 13px; border-bottom: 1px solid #f3cfc5; }
 .suggestion { border: 1px solid #d9d4fb; background: var(--iris-50); border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 6px; }
 .suggestion-head { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: #4b3dc4; }
 .suggestion-text { font-size: 14px; white-space: pre-wrap; max-height: 120px; overflow-y: auto; }

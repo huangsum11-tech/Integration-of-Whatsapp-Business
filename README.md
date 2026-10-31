@@ -4,6 +4,8 @@
 
 把 WhatsApp 號碼和 Instagram 私訊變成團隊共用收件匣。可以掃 QR Code 幾分鐘連接現有號碼，也可以經 Meta 官方 API 連接。對話自動備份，同事離職時客戶關係留在公司。AI 根據公司知識庫回答客人：可以只草擬、預先建議，或全自動回覆，不確定時轉交同事。
 
+> **第一次設定？** 請看 **[完整設定指南 docs/SETUP.md](docs/SETUP.md)**：連接 WhatsApp／Instagram 官方 API、連接及轉換 AI 和模型、知識庫範本（[`docs/knowledge-template.csv`](docs/knowledge-template.csv)）及資料存放位置、轉用人工時在哪裡回覆客人。
+
 ![收件匣](docs/screenshots/inbox.png)
 
 ## 核心功能
@@ -14,7 +16,8 @@
 | **自動備份** | 每個已連接號碼的訊息（包括連接時同步的對話紀錄）寫入 SQLite；相片、影片、語音與文件下載到 `data/media/`；全文搜尋（FTS5 trigram，中英文都搜得到）。 |
 | **AI 輔助回覆** | AI 從同事**實際發出**的回覆學習語氣（加上同事自己寫的風格說明），按對話內容和知識庫草擬回覆。同事檢查、修改後才發送，訊息會標示「AI 草擬」。 |
 | **AI 自動回覆** | 每個號碼可設定「關閉／AI 建議／全自動」。常見問題按關鍵字直接用團隊寫好的答案回覆（不經 AI）；其他問題由 AI 根據知識庫回答；知識庫沒有的資料、預約／退款等要人手處理的事、投訴或要求真人時，轉交同事。同事一回覆，AI 就在該對話暫停，直到按「恢復 AI」或對話完成。 |
-| **知識庫** | 「AI 助手」頁面管理公司資料、常見問題、政策和課程資料；附普拉提／健身室範本；可以「試問 AI」預覽回答。 |
+| **知識庫** | 「AI 助手」頁面管理公司資料、常見問題、政策和課程資料；可以用 Excel／Google Sheets 編輯 CSV 再匯入或匯出；附普拉提／健身室範本；可以「試問 AI」預覽回答。 |
+| **待人工** | AI 轉交的對話集中在收件匣「待人工」分頁，同事直接在 Baton 回覆，訊息經原本的 WhatsApp／Instagram 發給客人。 |
 | **多種 AI** | Claude、Gemini、Grok 任選，在「AI 助手」頁面切換；API 金鑰只放在伺服器環境變數。 |
 | **WhatsApp 官方 API 及 Instagram** | WhatsApp Cloud API 和 Instagram Messaging API 的訊息經同一個 webhook 進入收件匣，與 QR 連接的號碼並存。 |
 | **業務延續** | 「離職交接」即時停用登入，進行中的對話、負責的客戶及跟進中交易轉交接手同事；所有紀錄保留。 |
@@ -70,6 +73,8 @@ server/src/
   autoreply.ts   每個號碼的 AI 建議／全自動回覆、轉交同事
   channels.ts    按連接方式發送訊息
   meta.ts        WhatsApp Cloud API、Instagram API、webhook
+  knowledge.ts   知識庫 CSV 匯入／匯出
+  env.ts         讀取 .env
   analytics.ts   回覆速度、活躍度、成交
   routes.ts      REST API
   seed.ts        示範資料
@@ -86,7 +91,7 @@ web/src/
 npm install
 npm run build                  # 建立前端
 npm run seed --workspace server  # 可選：建立示範資料
-export ANTHROPIC_API_KEY=sk-ant-...   # 啟用 AI 草擬
+cp .env.example .env           # 填入 AI 金鑰、Meta 設定（見 docs/SETUP.md）
 npm start                      # http://localhost:4000
 ```
 
@@ -104,6 +109,8 @@ npm run dev    # 前端 http://localhost:5173
 ```
 
 ### 環境變數
+
+所有設定可以寫在專案根目錄的 `.env`（範本：[`.env.example`](.env.example)），啟動時自動讀取。
 
 | 變數 | 預設 | 說明 |
 | --- | --- | --- |

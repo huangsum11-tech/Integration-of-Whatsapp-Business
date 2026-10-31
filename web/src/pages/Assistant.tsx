@@ -11,18 +11,6 @@ const CATEGORIES: { id: KnowledgeCategory; label: string; hint: string }[] = [
 ]
 const CATEGORY_LABEL = Object.fromEntries(CATEGORIES.map((c) => [c.id, c.label])) as Record<KnowledgeCategory, string>
 
-/** A starting point for a Pilates or fitness studio; every [bracket] is for the studio to fill in. */
-const STUDIO_TEMPLATE: Omit<Draft, 'active'>[] = [
-  { category: 'faq', title: '有冇試堂？', body: '有呀！首次體驗堂 $[價錢]，WhatsApp 話我知想上邊日、邊個時段，我幫你安排 😊', keywords: '試堂, 體驗, trial, 第一次' },
-  { category: 'faq', title: '地址及營業時間', body: '我哋喺 [地址]，[營業時間]。[交通／泊車資料]', keywords: '地址, 喺邊, 點去, 營業時間, address' },
-  { category: 'class', title: '課程種類', body: 'Reformer 器械班：[人數上限] 人小班，適合 [程度]。\n墊上 Mat Pilates：[內容]。\n私人教練 1 對 1：[內容]。', keywords: '' },
-  { category: 'class', title: '價錢及套票', body: '單堂 $[價錢]；10 堂套票 $[價錢]（有效期 [月數] 個月）；私人課 $[價錢]／堂。', keywords: '' },
-  { category: 'policy', title: '取消及改期', body: '上堂前 [24] 小時或之前可免費改期；[24] 小時內取消或缺席，該堂會照扣。', keywords: '' },
-  { category: 'policy', title: '遲到安排', body: '遲到超過 [10] 分鐘，為安全起見未必可以入堂，該堂照扣。', keywords: '' },
-  { category: 'policy', title: '套票延期及轉讓', body: '[例如：套票可因病延期一次，需提供醫生紙；套票不可轉讓]', keywords: '' },
-  { category: 'other', title: '第一次上堂要準備', body: '請穿貼身舒適運動服，必須著防滑襪（現場有售 $[價錢]），建議提早 10 分鐘到。有傷患或懷孕請預先通知導師。', keywords: '' },
-]
-
 type Draft = Omit<Knowledge, 'id' | 'updated_at' | 'active'> & { id?: number; active: boolean }
 
 export default function Assistant() {
@@ -38,9 +26,21 @@ export default function Assistant() {
   useEffect(() => { loadSettings(); loadEntries() }, [loadSettings, loadEntries])
 
   const shown = filter === 'all' ? entries : entries.filter((e) => e.category === filter)
-  const loadTemplate = async () => {
-    for (const entry of STUDIO_TEMPLATE) await api('/knowledge', { body: { ...entry, active: true } })
-    loadEntries()
+  const [importMsg, setImportMsg] = useState('')
+  const runImport = async (body: { csv?: string; template?: boolean; replace?: boolean }) => {
+    setImportMsg('')
+    try {
+      const r = await api<{ added: number; updated: number }>('/knowledge/import', { body })
+      setImportMsg(`已匯入：新增 ${r.added} 項，更新 ${r.updated} 項。`)
+      loadEntries()
+    } catch (err) {
+      setImportMsg(err instanceof Error ? err.message : '匯入失敗')
+    }
+  }
+  const importFile = async (file: File | undefined) => {
+    if (!file) return
+    const replace = entries.length > 0 && confirm('要用這個檔案「取代」整個知識庫嗎？\n\n按「確定」：檔案以外的資料會被刪除\n按「取消」：只新增及更新檔案內的項目')
+    runImport({ csv: await file.text(), replace })
   }
 
   return (
@@ -65,6 +65,18 @@ export default function Assistant() {
                 </button>
               )}
             </div>
+            {isAdmin && (
+              <div className="kb-tools">
+                <a className="btn sm ghost" href="/api/knowledge/template.csv" download>下載範本 CSV</a>
+                <a className="btn sm ghost" href="/api/knowledge/export.csv" download>匯出 CSV</a>
+                <label className="btn sm ghost">
+                  匯入 CSV
+                  <input type="file" accept=".csv,text/csv" hidden onChange={(e) => { importFile(e.target.files?.[0]); e.target.value = '' }} />
+                </label>
+                <span className="faint">可以用 Excel／Google Sheets 編輯後再匯入</span>
+              </div>
+            )}
+            {importMsg && <div className="demo-hint" style={{ marginBottom: 10 }}>{importMsg}</div>}
             <div className="tabs" role="tablist" style={{ marginBottom: 12 }}>
               {[{ id: 'all' as const, label: '全部' }, ...CATEGORIES].map((c) => (
                 <button key={c.id} role="tab" aria-selected={filter === c.id} className={`tab ${filter === c.id ? 'active' : ''}`} onClick={() => setFilter(c.id)}>
@@ -78,7 +90,7 @@ export default function Assistant() {
                 {entries.length === 0 ? '未有資料。先加入課程、價錢和取消政策，AI 才能準確回答客人。' : '這個分類未有資料'}
                 {entries.length === 0 && isAdmin && (
                   <div style={{ marginTop: 10 }}>
-                    <button className="btn sm" onClick={loadTemplate}><Icon name="book" size={14} />載入普拉提／健身室範本</button>
+                    <button className="btn sm" onClick={() => runImport({ template: true })}><Icon name="book" size={14} />載入普拉提／健身室範本</button>
                     <div style={{ marginTop: 4 }}>範本內 [方括號] 的地方請改成你們的資料。</div>
                   </div>
                 )}

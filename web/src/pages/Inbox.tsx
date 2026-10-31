@@ -5,8 +5,9 @@ import { Avatar, Icon, Modal } from '../components'
 import { clock, dayLabel, formatPhone, money, timeLabel } from '../format'
 import { getSocket } from '../socket'
 
-type View = 'all' | 'mine' | 'unassigned' | 'closed'
+type View = 'human' | 'all' | 'mine' | 'unassigned' | 'closed'
 const VIEWS: { id: View; label: string }[] = [
+  { id: 'human', label: '待人工' },
   { id: 'mine', label: '我的' },
   { id: 'unassigned', label: '未分配' },
   { id: 'all', label: '全部' },
@@ -28,7 +29,7 @@ export default function Inbox({ conversationId }: { conversationId: number | nul
   const [numberId, setNumberId] = useState<number | ''>('')
   const [q, setQ] = useState('')
   const [conversations, setConversations] = useState<Conversation[]>([])
-  const [counts, setCounts] = useState<Record<View, number>>({ all: 0, mine: 0, unassigned: 0, closed: 0 })
+  const [counts, setCounts] = useState<Record<View, number>>({ human: 0, all: 0, mine: 0, unassigned: 0, closed: 0 })
   const [detail, setDetail] = useState<Detail | null>(null)
   const { numbers } = useApp()
 
@@ -121,6 +122,7 @@ export default function Inbox({ conversationId }: { conversationId: number | nul
                   <div className="name">{c.contact_name}</div>
                   <div className="preview">{c.last_preview || ' '}</div>
                   <div className="tags">
+                    {c.needs_human ? <span className="chip coral" style={{ fontSize: 11, padding: '0 7px' }}>待人工</span> : null}
                     <span className="number-tag">{c.number_label}</span>
                     {assignee
                       ? <span className="faint" style={{ fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -240,6 +242,12 @@ function Thread({ detail }: { detail: Detail }) {
         </button>
       </header>
 
+      {conversation.needs_human ? (
+        <div className="human-banner">
+          <Icon name="handoff" size={15} />
+          AI 已把這位客人轉交同事。請在下面「回覆客戶」直接回覆，訊息會經 {conversation.channel === 'instagram' ? 'Instagram' : 'WhatsApp'} 發給客人。
+        </div>
+      ) : null}
       <div className="thread-body" ref={bodyRef}>
         {timeline.map((item) => {
           const day = dayLabel(item.ts)

@@ -31,6 +31,8 @@ export interface Conversation {
   ai_paused: number
   /** The AI's suggested reply, waiting for a teammate (reply mode 'suggest'). */
   ai_suggestion: string | null
+  /** 1 while the AI has handed the conversation to the team and nobody has replied yet. */
+  needs_human: number
 }
 
 export type Channel = 'wa_web' | 'wa_cloud' | 'instagram'
