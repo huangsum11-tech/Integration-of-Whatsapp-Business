@@ -7,6 +7,7 @@ import Assistant from './pages/Assistant'
 import Contacts from './pages/Contacts'
 import Inbox from './pages/Inbox'
 import Numbers from './pages/Numbers'
+import Payroll from './pages/Payroll'
 import Team from './pages/Team'
 
 interface AppState {
@@ -21,11 +22,12 @@ interface AppState {
 const AppContext = createContext<AppState | null>(null)
 export const useApp = () => useContext(AppContext)!
 
-const ROUTES: { path: string; label: string; icon: IconName }[] = [
+const ROUTES: { path: string; label: string; icon: IconName; admin?: boolean }[] = [
   { path: 'inbox', label: '收件匣', icon: 'inbox' },
   { path: 'contacts', label: '聯絡簿', icon: 'contacts' },
   { path: 'analytics', label: '分析', icon: 'chart' },
   { path: 'ai', label: 'AI 助手', icon: 'sparkle' },
+  { path: 'payroll', label: '糧單', icon: 'wallet', admin: true },
   { path: 'numbers', label: '號碼', icon: 'phone' },
   { path: 'team', label: '團隊', icon: 'team' },
 ]
@@ -65,7 +67,8 @@ function Shell({ me, setMe, onLogout }: { me: User; setMe: (u: User) => void; on
   const [numbers, setNumbers] = useState<WaNumber[]>([])
   const [unread, setUnread] = useState(0)
   const route = useRoute()
-  const page = ROUTES.some((r) => r.path === route[0]) ? route[0] : 'inbox'
+  const routes = ROUTES.filter((r) => !r.admin || me.role === 'admin')
+  const page = routes.some((r) => r.path === route[0]) ? route[0] : 'inbox'
 
   const refreshUsers = useCallback(() => { api<User[]>('/users').then(setUsers) }, [])
   const refreshNumbers = useCallback(() => { api<WaNumber[]>('/numbers').then(setNumbers) }, [])
@@ -91,7 +94,7 @@ function Shell({ me, setMe, onLogout }: { me: User; setMe: (u: User) => void; on
       <div className="shell">
         <nav className="rail" aria-label="主選單">
           <div className="logo"><Logo size={42} /></div>
-          {ROUTES.map((r) => (
+          {routes.map((r) => (
             <a key={r.path} href={`#/${r.path}`} className={`rail-btn ${page === r.path ? 'active' : ''}`} style={{ textDecoration: 'none' }}>
               <Icon name={r.icon} size={21} />
               {r.label}
@@ -109,6 +112,7 @@ function Shell({ me, setMe, onLogout }: { me: User; setMe: (u: User) => void; on
           {page === 'contacts' && <Contacts />}
           {page === 'analytics' && <Analytics />}
           {page === 'ai' && <Assistant />}
+          {page === 'payroll' && <Payroll />}
           {page === 'numbers' && <Numbers />}
           {page === 'team' && <Team />}
         </main>

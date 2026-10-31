@@ -226,14 +226,17 @@ const CONVERSATION_SELECT = `
   JOIN contacts ct ON ct.id = c.contact_id
   JOIN numbers n ON n.id = c.number_id`
 
+/** Chats with instructors carry payslips: only admins see them in the shared inbox. */
+export const INSTRUCTOR_CHAT_SQL = "ct.phone IN (SELECT phone FROM instructors WHERE phone != '')"
+
 export function getConversation(id: number) {
   return get(`${CONVERSATION_SELECT} WHERE c.id = ?`, id)
 }
 
 export function listConversations(filter: {
-  view: string; userId: number; numberId?: number; contactId?: number; q?: string
+  view: string; userId: number; admin: boolean; numberId?: number; contactId?: number; q?: string
 }) {
-  const where: string[] = []
+  const where: string[] = filter.admin ? [] : [`NOT (${INSTRUCTOR_CHAT_SQL})`]
   const params: any[] = []
   if (filter.contactId) { where.push('c.contact_id = ?'); params.push(filter.contactId) }
   else if (filter.view === 'mine') { where.push("c.assignee_id = ? AND c.status = 'open'"); params.push(filter.userId) }

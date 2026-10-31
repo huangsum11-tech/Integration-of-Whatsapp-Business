@@ -8,9 +8,13 @@ import {
 } from './auth.js'
 import { canSend, sendReply } from './channels.js'
 import { CONTACT_NAME_SQL, CONTACT_PHONE_SQL, all, get, getSetting, run, setSetting, tx } from './db.js'
-import { addEvent, getConversation, getTimeline, listConversations } from './inbox.js'
+import { INSTRUCTOR_CHAT_SQL, addEvent, getConversation, getTimeline, listConversations } from './inbox.js'
 import { TEMPLATE_PATH, exportCsv, importCsv, importTemplate } from './knowledge.js'
 import { PROVIDERS, currentAi, hasKey, type Provider } from './llm.js'
+import {
+  DEFAULT_TEMPLATE, analyzeReport, createRun, getRun, listRuns, payrollSettings, render, savePayrollSettings, sendRun,
+} from './payroll.js'
+import { normalizePhone } from './channels.js'
 import { handleWebhook, validSignature, verifyCloud, verifyInstagram } from './meta.js'
 import { broadcast } from './realtime.js'
 import { MEDIA_DIR, connectNumber, currentQr, disconnectNumber, isConnected, syncContacts } from './whatsapp.js'
@@ -238,6 +242,7 @@ api.get('/conversations', (req, res) => {
   res.json(listConversations({
     view: String(req.query.view ?? 'all'),
     userId: req.user.id,
+    admin: req.user.role === 'admin',
     numberId: req.query.numberId ? Number(req.query.numberId) : undefined,
     contactId: req.query.contactId ? Number(req.query.contactId) : undefined,
     q: req.query.q ? String(req.query.q) : undefined,
@@ -252,15 +257,16 @@ api.get('/conversations/counts', (req, res) => {
        SUM(status = 'open' AND assignee_id IS NULL) AS unassigned,
        SUM(status = 'closed') AS closed,
        SUM(status = 'open' AND needs_human = 1) AS human
-     FROM conversations`,
-    req.user.id,
+     FROM conversations c JOIN contacts ct ON ct.id = c.contact_id
+     WHERE ? OR NOT (${INSTRUCTOR_CHAT_SQL})`,
+    req.user.id, req.user.role === 'admin' ? 1 : 0,
   ))
 })
 
 api.get('/conversations/:id', (req, res) => {
   const id = Number(req.params.id)
   const conversation = getConversation(id)
-  if (!conversation) return res.status(404).json({ error: '找不到對話' })
+  if (!conversation || (req.user.role !== 'admin' && isInstructorChat(id))) return res.status(404).json({ error: '找不到對話' })
   const contact = getContact(conversation.contact_id)
   const deals = all('SELECT d.*, u.name AS user_name FROM deals d LEFT JOIN users u ON u.id = d.user_id WHERE d.contact_id = ? ORDER BY d.created_at DESC', conversation.contact_id)
   const otherConversations = all(
@@ -270,6 +276,10 @@ api.get('/conversations/:id', (req, res) => {
   )
   res.json({ conversation, contact, deals, otherConversations, timeline: getTimeline(id), canSend: canSend(conversation.number_id) })
 })
+
+function isInstructorChat(conversationId: number) {
+  return Boolean(get(`SELECT 1 FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = ? AND ${INSTRUCTOR_CHAT_SQL}`, conversationId))
+}
 
 api.post('/conversations/:id/read', (req, res) => {
   const id = Number(req.params.id)
@@ -447,6 +457,132 @@ api.delete('/knowledge/:id', requireAdmin, (req, res) => {
   res.json({ ok: true })
 })
 
+// ---------- Instructor payroll (admin only) ----------
+
+api.get('/payroll', requireAdmin, (_req, res) => {
+  res.json({
+    settings: payrollSettings(),
+    defaultTemplate: DEFAULT_TEMPLATE,
+    instructors: all('SELECT * FROM instructors ORDER BY active DESC, name'),
+    runs: listRuns(),
+  })
+})
+
+api.put('/payroll/settings', requireAdmin, (req, res) => {
+  const b = body(z.object({
+    number_id: z.number().int().nullable().optional(),
+    template: z.string().min(1).max(4000).optional(),
+    wa_template_name: z.string().max(200).optional(),
+    wa_template_language: z.string().max(20).optional(),
+    wa_template_params: z.string().max(500).optional(),
+    reminder_phone: z.string().max(30).optional(),
+    reminder_hour: z.number().int().min(0).max(23).optional(),
+  }), req)
+  savePayrollSettings(b)
+  res.json(payrollSettings())
+})
+
+const instructor = z.object({ name: z.string().trim().min(1).max(120), phone: z.string().max(30).default(''), active: z.boolean().default(true) })
+
+api.post('/payroll/instructors', requireAdmin, (req, res) => {
+  const b = body(instructor, req)
+  if (get('SELECT id FROM instructors WHERE name = ?', b.name)) return res.status(409).json({ error: '已有同名導師' })
+  run('INSERT INTO instructors (name, phone, active) VALUES (?, ?, ?)', b.name, b.phone ? normalizePhone(b.phone) : '', b.active ? 1 : 0)
+  res.json({ ok: true })
+})
+
+api.patch('/payroll/instructors/:id', requireAdmin, (req, res) => {
+  const b = body(instructor.partial(), req)
+  const id = Number(req.params.id)
+  if (b.name) run('UPDATE instructors SET name = ? WHERE id = ?', b.name, id)
+  if (b.phone !== undefined) run('UPDATE instructors SET phone = ? WHERE id = ?', b.phone ? normalizePhone(b.phone) : '', id)
+  if (b.active !== undefined) run('UPDATE instructors SET active = ? WHERE id = ?', b.active ? 1 : 0, id)
+  res.json({ ok: true })
+})
+
+api.delete('/payroll/instructors/:id', requireAdmin, (req, res) => {
+  run('DELETE FROM instructors WHERE id = ?', Number(req.params.id))
+  res.json({ ok: true })
+})
+
+/** Read an uploaded report's columns, to choose which hold the name, amount and class count. */
+api.post('/payroll/analyze', requireAdmin, (req, res) => {
+  const { csv } = body(z.object({ csv: z.string().min(1).max(900_000) }), req)
+  try {
+    const r = analyzeReport(csv)
+    res.json({ columns: r.columns, guess: r.guess, rowCount: r.rows.length, sample: r.rows.slice(0, 5) })
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : '未能讀取報表' })
+  }
+})
+
+api.post('/payroll/runs', requireAdmin, (req, res) => {
+  const b = body(z.object({
+    month: z.string().regex(/^\d{4}-\d{2}$/), csv: z.string().min(1).max(900_000),
+    nameColumn: z.string().min(1), amountColumn: z.string().optional(), countColumn: z.string().optional(),
+  }), req)
+  try {
+    res.json(getRun(createRun({ ...b, userId: req.user.id })))
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : '未能建立糧單' })
+  }
+})
+
+api.get('/payroll/runs/:id', requireAdmin, (req, res) => {
+  const r = getRun(Number(req.params.id))
+  if (!r) return res.status(404).json({ error: '找不到糧單' })
+  res.json(r)
+})
+
+/** Send now, or schedule (at = unix seconds); null cancels a schedule. */
+api.post('/payroll/runs/:id/send', requireAdmin, (req, res) => {
+  const id = Number(req.params.id)
+  const { at } = body(z.object({ at: z.number().int().nullable().optional() }), req)
+  const r = get<{ status: string }>('SELECT status FROM payroll_runs WHERE id = ?', id)
+  if (!r) return res.status(404).json({ error: '找不到糧單' })
+  if (r.status === 'sending') return res.status(409).json({ error: '正在發送中' })
+  if (!payrollSettings().number_id) return res.status(400).json({ error: '請先在「發送設定」選擇用哪個 WhatsApp 號碼發送' })
+  if (at === null) {
+    run("UPDATE payroll_runs SET status = 'draft', scheduled_at = NULL WHERE id = ?", id)
+  } else if (at && at > Date.now() / 1000) {
+    run("UPDATE payroll_runs SET status = 'scheduled', scheduled_at = ? WHERE id = ?", at, id)
+  } else {
+    sendRun(id).catch((err) => console.error('Payroll send failed', err))
+  }
+  broadcast('payroll', { runId: id })
+  res.json({ ok: true })
+})
+
+api.patch('/payroll/items/:id', requireAdmin, (req, res) => {
+  const b = body(z.object({ message: z.string().min(1).max(4000).optional(), skip: z.boolean().optional() }), req)
+  const id = Number(req.params.id)
+  const item = get<{ status: string }>('SELECT status FROM payroll_items WHERE id = ?', id)
+  if (!item) return res.status(404).json({ error: '找不到' })
+  if (item.status === 'sent') return res.status(409).json({ error: '已發送，不能修改' })
+  if (b.message) run('UPDATE payroll_items SET message = ? WHERE id = ?', b.message, id)
+  if (b.skip !== undefined) run('UPDATE payroll_items SET status = ?, error = NULL WHERE id = ?', b.skip ? 'skipped' : 'pending', id)
+  res.json({ ok: true })
+})
+
+/** Re-fill every unsent message from the current template (after editing the template). */
+api.post('/payroll/runs/:id/rerender', requireAdmin, (req, res) => {
+  const id = Number(req.params.id)
+  const template = payrollSettings().template
+  tx(() => {
+    for (const item of all<{ id: number; fields: string }>("SELECT id, fields FROM payroll_items WHERE run_id = ? AND status != 'sent'", id)) {
+      run('UPDATE payroll_items SET message = ? WHERE id = ?', render(template, JSON.parse(item.fields)), item.id)
+    }
+  })
+  res.json(getRun(id))
+})
+
+api.delete('/payroll/runs/:id', requireAdmin, (req, res) => {
+  const id = Number(req.params.id)
+  if (get("SELECT id FROM payroll_items WHERE run_id = ? AND status = 'sent'", id)) return res.status(409).json({ error: '已有糧單發出，不能刪除' })
+  run('DELETE FROM payroll_runs WHERE id = ?', id)
+  res.json({ ok: true })
+})
+
 // ---------- Company contact book ----------
 
 /** Contact columns with phone hidden (NULL) while WhatsApp only gave us a LID. */
@@ -519,10 +655,12 @@ api.get('/search', (req, res) => {
     FROM messages m JOIN conversations c ON c.id = m.conversation_id
     JOIN contacts ct ON ct.id = c.contact_id JOIN numbers n ON n.id = c.number_id`
   // The trigram index needs 3+ characters; shorter queries (e.g. two Chinese characters) use LIKE.
+  const visible = `(? OR NOT (${INSTRUCTOR_CHAT_SQL}))`
+  const admin = req.user.role === 'admin' ? 1 : 0
   const rows = [...q].length >= 3
-    ? all(`${select} WHERE m.id IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?) ORDER BY m.ts DESC LIMIT 100`,
-      `"${q.replaceAll('"', '""')}"`)
-    : all(`${select} WHERE m.body LIKE ? ORDER BY m.ts DESC LIMIT 100`, `%${q}%`)
+    ? all(`${select} WHERE ${visible} AND m.id IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?) ORDER BY m.ts DESC LIMIT 100`,
+      admin, `"${q.replaceAll('"', '""')}"`)
+    : all(`${select} WHERE ${visible} AND m.body LIKE ? ORDER BY m.ts DESC LIMIT 100`, admin, `%${q}%`)
   res.json(rows)
 })
 

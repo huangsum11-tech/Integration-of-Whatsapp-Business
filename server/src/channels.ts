@@ -1,7 +1,7 @@
 /** Sending a reply, whichever way the number is connected. */
 import { get, run } from './db.js'
 import { getConversation, storeMessage } from './inbox.js'
-import { sendCloudText, sendInstagramText } from './meta.js'
+import { sendCloudTemplate, sendCloudText, sendInstagramText, type TemplateMessage } from './meta.js'
 import { isConnected, sendText } from './whatsapp.js'
 
 export type Channel = 'wa_web' | 'wa_cloud' | 'instagram'
@@ -44,5 +44,39 @@ export async function sendReply(conversationId: number, text: string, opts: Send
       run('UPDATE messages SET sender_id = ?, ai_assisted = ?, ai_auto = ? WHERE conversation_id = ? AND wa_id = ?',
         opts.userId, message.aiAssisted || message.aiAuto ? 1 : 0, message.aiAuto ? 1 : 0, conversationId, waId)
     }
+  }
+}
+
+/** HK numbers are often written with 8 digits only; WhatsApp needs the country code. */
+export function normalizePhone(phone: string) {
+  const digits = phone.replace(/\D/g, '')
+  return digits.length === 8 ? `852${digits}` : digits
+}
+
+/**
+ * Start (or continue) a chat with any phone number, e.g. an instructor's payslip.
+ * The WhatsApp Cloud API only allows this with an approved template; the text is what the
+ * team sees in the inbox.
+ */
+export async function sendToPhone(numberId: number, phone: string, text: string, opts: { userId: number | null; template?: TemplateMessage }) {
+  const number = get<{ demo: number; channel: Channel; status: string }>('SELECT demo, channel, status FROM numbers WHERE id = ?', numberId)
+  if (!number) throw new Error('找不到發送號碼')
+  const pn = normalizePhone(phone)
+  if (pn.length < 8) throw new Error('電話號碼不正確')
+  const jid = `${pn}@s.whatsapp.net`
+  const message = {
+    numberId, jid, contact: { pn }, fromMe: true, senderId: opts.userId, type: 'text' as const, body: text,
+    ts: Math.floor(Date.now() / 1000), live: true,
+  }
+  if (number.demo) {
+    storeMessage({ ...message, waId: `demo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })
+  } else if (number.channel === 'wa_web') {
+    await sendText(numberId, jid, text, opts.userId, false)
+  } else if (number.channel === 'wa_cloud') {
+    if (!opts.template?.name) throw new Error('官方 Cloud API 主動發訊息需要已審批的模板，請在設定填寫模板名稱')
+    if (number.status !== 'connected') throw new Error('此號碼未連接')
+    storeMessage({ ...message, waId: await sendCloudTemplate(numberId, pn, opts.template) })
+  } else {
+    throw new Error('Instagram 不能主動發訊息給電話號碼，請選 WhatsApp 號碼')
   }
 }

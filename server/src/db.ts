@@ -179,6 +179,36 @@ CREATE TABLE IF NOT EXISTS knowledge (
   updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
+-- Instructors who receive a monthly payslip. name must match the name in the Vibefam report.
+CREATE TABLE IF NOT EXISTS instructors (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  phone TEXT NOT NULL DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+-- One upload of a month's payroll report, and the message for each instructor in it.
+CREATE TABLE IF NOT EXISTS payroll_runs (
+  id INTEGER PRIMARY KEY,
+  month TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','scheduled','sending','sent')),
+  scheduled_at INTEGER,
+  created_by INTEGER REFERENCES users(id),
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  sent_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS payroll_items (
+  id INTEGER PRIMARY KEY,
+  run_id INTEGER NOT NULL REFERENCES payroll_runs(id) ON DELETE CASCADE,
+  instructor_name TEXT NOT NULL,
+  -- Values for the template placeholders, as JSON.
+  fields TEXT NOT NULL DEFAULT '{}',
+  message TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sent','failed','skipped')),
+  error TEXT,
+  sent_at INTEGER
+);
 `)
 
 export function getSetting(key: string, fallback = ''): string {

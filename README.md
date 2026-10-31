@@ -17,6 +17,7 @@
 | **AI 輔助回覆** | AI 從同事**實際發出**的回覆學習語氣（加上同事自己寫的風格說明），按對話內容和知識庫草擬回覆。同事檢查、修改後才發送，訊息會標示「AI 草擬」。 |
 | **AI 自動回覆** | 每個號碼可設定「關閉／AI 建議／全自動」。常見問題按關鍵字直接用團隊寫好的答案回覆（不經 AI）；其他問題由 AI 根據知識庫回答；知識庫沒有的資料、預約／退款等要人手處理的事、投訴或要求真人時，轉交同事。同事一回覆，AI 就在該對話暫停，直到按「恢復 AI」或對話完成。 |
 | **知識庫** | 「AI 助手」頁面管理公司資料、常見問題、政策和課程資料；可以用 Excel／Google Sheets 編輯 CSV 再匯入或匯出；附普拉提／健身室範本；可以「試問 AI」預覽回答。 |
+| **導師糧單** | 上載從 Vibefam 匯出的每月糧單報表（CSV），自動按導師整理、套用訊息範本，預覽後經 WhatsApp 逐一發給導師（即時或排程）；每月最後一日用 WhatsApp 提醒管理員上載。糧單對話只有管理員看到。 |
 | **待人工** | AI 轉交的對話集中在收件匣「待人工」分頁，同事直接在 Baton 回覆，訊息經原本的 WhatsApp／Instagram 發給客人。 |
 | **多種 AI** | Claude、Gemini、Grok 任選，在「AI 助手」頁面切換；API 金鑰只放在伺服器環境變數。 |
 | **WhatsApp 官方 API 及 Instagram** | WhatsApp Cloud API 和 Instagram Messaging API 的訊息經同一個 webhook 進入收件匣，與 QR 連接的號碼並存。 |
@@ -74,13 +75,14 @@ server/src/
   channels.ts    按連接方式發送訊息
   meta.ts        WhatsApp Cloud API、Instagram API、webhook
   knowledge.ts   知識庫 CSV 匯入／匯出
+  payroll.ts     導師糧單：讀取 Vibefam 報表、發送、排程、月底提醒
   env.ts         讀取 .env
   analytics.ts   回覆速度、活躍度、成交
   routes.ts      REST API
   seed.ts        示範資料
 web/src/
   App.tsx        登入、導航、全域狀態
-  pages/         Inbox、Contacts、Analytics、Assistant（AI 助手）、Numbers、Team
+  pages/         Inbox、Contacts、Analytics、Assistant（AI 助手）、Payroll（糧單）、Numbers、Team
 ```
 
 ## 開始使用
@@ -125,6 +127,8 @@ npm run dev    # 前端 http://localhost:5173
 | `META_APP_SECRET` | | Meta App 密鑰，用來驗證 webhook 簽名（正式使用必須設定） |
 | `INSTAGRAM_APP_SECRET` | | Instagram App 密鑰（如與 Meta App 密鑰不同） |
 | `META_GRAPH_VERSION` | `v23.0` | Meta Graph API 版本 |
+| `BATON_TZ` | `Asia/Hong_Kong` | 糧單排程及月底提醒用的時區 |
+| `BATON_PAYROLL_GAP_MS` | `3000` | 每份糧單之間相隔多少毫秒 |
 | `BATON_WA_LOG` | `warn` | Baileys 日誌等級 |
 | `NODE_ENV` | | 設為 `production` 時 cookie 只經 HTTPS 傳送 |
 
@@ -149,8 +153,8 @@ npm run dev    # 前端 http://localhost:5173
 | ![](docs/screenshots/login.png) | ![](docs/screenshots/analytics.png) |
 | **號碼（QR 連接）** | **團隊（離職交接、AI 語氣）** |
 | ![](docs/screenshots/numbers.png) | ![](docs/screenshots/team.png) |
-| **AI 助手（知識庫、試問 AI、選擇 AI）** | |
-| ![](docs/screenshots/assistant.png) | |
+| **AI 助手（知識庫、試問 AI、選擇 AI）** | **導師糧單** |
+| ![](docs/screenshots/assistant.png) | ![](docs/screenshots/payroll.png) |
 
 ## 尚未包括
 

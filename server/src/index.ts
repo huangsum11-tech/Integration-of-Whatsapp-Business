@@ -12,6 +12,7 @@ import { ZodError } from 'zod'
 import { SESSION_COOKIE, userForToken } from './auth.js'
 import { setIo } from './realtime.js'
 import './autoreply.js'
+import { startPayrollScheduler } from './payroll.js'
 import { api, media, webhooks } from './routes.js'
 import { restoreAll } from './whatsapp.js'
 
@@ -78,4 +79,5 @@ server.listen(PORT, async () => {
     console.warn('未設定 META_APP_SECRET：/webhooks/meta 不會驗證 Meta 簽名，正式使用前請設定')
   }
   restoreAll().catch((err) => console.error('Failed to restore WhatsApp sessions', err))
+  startPayrollScheduler()
 })

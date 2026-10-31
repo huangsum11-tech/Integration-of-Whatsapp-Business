@@ -77,6 +77,32 @@ export async function sendCloudText(numberId: number, conversationId: number, ji
   return id
 }
 
+export interface TemplateMessage { name: string; language: string; params: string[] }
+
+/**
+ * A pre-approved message template: the only way to start a WhatsApp conversation through
+ * the Cloud API, or to message someone more than 24 hours after they last wrote.
+ */
+export async function sendCloudTemplate(numberId: number, phone: string, template: TemplateMessage) {
+  const config = numberConfig<CloudConfig>(numberId)
+  const data = await graph<{ messages?: { id: string }[] }>(`${FB}/${encodeURIComponent(config.phoneNumberId)}/messages`, config.accessToken, {
+    method: 'POST',
+    body: {
+      messaging_product: 'whatsapp', recipient_type: 'individual', to: phone, type: 'template',
+      template: {
+        name: template.name,
+        language: { code: template.language },
+        components: template.params.length
+          ? [{ type: 'body', parameters: template.params.map((text) => ({ type: 'text', text })) }]
+          : [],
+      },
+    },
+  })
+  const id = data.messages?.[0]?.id
+  if (!id) throw new Error('發送失敗')
+  return id
+}
+
 export async function sendInstagramText(numberId: number, conversationId: number, jid: string, text: string) {
   assertServiceWindow(conversationId)
   const config = numberConfig<InstagramConfig>(numberId)
