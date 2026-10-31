@@ -57,7 +57,7 @@ export interface Contact {
   /** 1 for Instagram customers, who have no phone number. */
   instagram?: number
   owner_id: number | null; display_name?: string; owner_name?: string | null
-  conversations?: number; numbers?: string | null; last_message_at?: number | null; won_amount?: number
+  conversations?: number; numbers?: string | null; tags?: string | null; last_message_at?: number | null; won_amount?: number
 }
 
 export interface Deal {

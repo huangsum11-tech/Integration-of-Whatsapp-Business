@@ -13,6 +13,8 @@ import { SESSION_COOKIE, userForToken } from './auth.js'
 import { setIo } from './realtime.js'
 import './autoreply.js'
 import { startAutomation } from './automation.js'
+import { startCampaignScheduler } from './campaigns.js'
+import './igcomments.js'
 import { startPayrollScheduler } from './payroll.js'
 import { api, media, webhooks } from './routes.js'
 import { restoreAll } from './whatsapp.js'
@@ -86,4 +88,5 @@ server.listen(PORT, async () => {
   restoreAll().catch((err) => console.error('Failed to restore WhatsApp sessions', err))
   startPayrollScheduler()
   startAutomation()
+  startCampaignScheduler()
 })

@@ -19,6 +19,9 @@ import {
   DEFAULT_FOLLOWUP, automationSettings, recordTrial, saveAutomationSettings, trialsForContact, upcomingTrials, waitingCustomers,
 } from './automation.js'
 import { parseLocal } from './time.js'
+import {
+  SEGMENTS, allTags, audienceContacts, getCampaign, importContacts, listCampaigns, saveCampaign, sendCampaign, sendTest, setTags, tagsFor,
+} from './campaigns.js'
 import { handleWebhook, validSignature, verifyCloud, verifyInstagram } from './meta.js'
 import { broadcast } from './realtime.js'
 import { MEDIA_DIR, connectNumber, currentQr, disconnectNumber, isConnected, syncContacts } from './whatsapp.js'
@@ -275,12 +278,13 @@ api.get('/conversations/:id', (req, res) => {
   const contact = getContact(conversation.contact_id)
   const deals = all('SELECT d.*, u.name AS user_name FROM deals d LEFT JOIN users u ON u.id = d.user_id WHERE d.contact_id = ? ORDER BY d.created_at DESC', conversation.contact_id)
   const trials = trialsForContact(conversation.contact_id)
+  const tags = tagsFor(conversation.contact_id)
   const otherConversations = all(
     `SELECT c.id, c.last_message_at, c.last_preview, n.label AS number_label
      FROM conversations c JOIN numbers n ON n.id = c.number_id WHERE c.contact_id = ? AND c.id != ?`,
     conversation.contact_id, id,
   )
-  res.json({ conversation, contact, deals, trials, otherConversations, timeline: getTimeline(id), canSend: canSend(conversation.number_id) })
+  res.json({ conversation, contact, deals, trials, tags, otherConversations, timeline: getTimeline(id), canSend: canSend(conversation.number_id) })
 })
 
 function isInstructorChat(conversationId: number) {
@@ -553,6 +557,131 @@ api.delete('/quick-replies/:id', requireAdmin, (req, res) => {
   res.json({ ok: true })
 })
 
+// ---------- Marketing: tags, broadcasts, Instagram comment rules ----------
+
+api.get('/tags', (_req, res) => res.json(allTags()))
+
+api.put('/contacts/:id/tags', (req, res) => {
+  const { tags } = body(z.object({ tags: z.array(z.string().trim().min(1).max(30)).max(30) }), req)
+  setTags(Number(req.params.id), tags)
+  res.json(tagsFor(Number(req.params.id)))
+})
+
+api.post('/contacts/import', requireAdmin, (req, res) => {
+  const b = body(z.object({ csv: z.string().min(1).max(900_000), tag: z.string().max(30).default('') }), req)
+  try {
+    res.json(importContacts(b.csv, b.tag))
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : '匯入失敗' })
+  }
+})
+
+const audience = z.object({ segment: z.enum(Object.keys(SEGMENTS) as [keyof typeof SEGMENTS]), tags: z.array(z.string()).default([]) })
+
+api.post('/audience/preview', requireAdmin, (req, res) => {
+  const contacts = audienceContacts(body(audience, req))
+  res.json({ count: contacts.length, sample: contacts.slice(0, 8).map((c) => c.name) })
+})
+
+api.get('/campaigns', requireAdmin, (_req, res) => {
+  res.json({ campaigns: listCampaigns(), segments: SEGMENTS, tags: allTags(), price: Number(getSetting('marketing_price', '0.64')) })
+})
+
+const campaignInput = z.object({
+  name: z.string().trim().min(1).max(120), number_id: z.number().int().nullable(), audience,
+  message: z.string().max(4000).default(''),
+  wa_template_name: z.string().max(200).default(''), wa_template_language: z.string().max(20).default('zh_HK'),
+  wa_template_params: z.string().max(500).default(''),
+  ai_note: z.string().max(4000).default(''), ai_until: z.number().int().nullable().default(null),
+})
+
+api.post('/campaigns', requireAdmin, (req, res) => {
+  res.json(getCampaign(saveCampaign(body(campaignInput, req), req.user.id)))
+})
+
+api.get('/campaigns/:id', requireAdmin, (req, res) => {
+  const c = getCampaign(Number(req.params.id))
+  if (!c) return res.status(404).json({ error: '找不到群發' })
+  res.json(c)
+})
+
+api.put('/campaigns/:id', requireAdmin, (req, res) => {
+  try {
+    res.json(getCampaign(saveCampaign(body(campaignInput, req), req.user.id, Number(req.params.id))))
+  } catch (err) {
+    res.status(409).json({ error: err instanceof Error ? err.message : '未能儲存' })
+  }
+})
+
+api.delete('/campaigns/:id', requireAdmin, (req, res) => {
+  const id = Number(req.params.id)
+  if (get("SELECT 1 FROM campaign_recipients WHERE campaign_id = ? AND status = 'sent'", id)) return res.status(409).json({ error: '已有訊息發出，不能刪除' })
+  run('DELETE FROM campaigns WHERE id = ?', id)
+  res.json({ ok: true })
+})
+
+api.post('/campaigns/:id/test', requireAdmin, async (req, res) => {
+  const { phone } = body(z.object({ phone: z.string().min(8).max(30) }), req)
+  try {
+    await sendTest(Number(req.params.id), phone, req.user.id)
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : '測試發送失敗' })
+  }
+})
+
+/** Send now, schedule (at = unix seconds), or cancel a schedule (at = null). Sending again retries failures. */
+api.post('/campaigns/:id/send', requireAdmin, (req, res) => {
+  const id = Number(req.params.id)
+  const { at } = body(z.object({ at: z.number().int().nullable().optional() }), req)
+  const c = get<{ status: string; number_id: number | null; message: string }>('SELECT status, number_id, message FROM campaigns WHERE id = ?', id)
+  if (!c) return res.status(404).json({ error: '找不到群發' })
+  if (c.status === 'sending') return res.status(409).json({ error: '正在發送中' })
+  if (!c.number_id) return res.status(400).json({ error: '請先選擇發送號碼' })
+  if (!c.message.trim()) return res.status(400).json({ error: '請先填寫訊息內容' })
+  if (at === null) run("UPDATE campaigns SET status = 'draft', scheduled_at = NULL WHERE id = ? AND status = 'scheduled'", id)
+  else if (at && at > Date.now() / 1000) run("UPDATE campaigns SET status = 'scheduled', scheduled_at = ? WHERE id = ?", at, id)
+  else sendCampaign(id).catch((err) => console.error('Broadcast failed', err))
+  broadcast('campaign', { id })
+  res.json({ ok: true })
+})
+
+api.put('/marketing/price', requireAdmin, (req, res) => {
+  const { price } = body(z.object({ price: z.number().min(0).max(100) }), req)
+  setSetting('marketing_price', String(price))
+  res.json({ ok: true })
+})
+
+api.get('/ig-rules', requireAdmin, (_req, res) => {
+  res.json({
+    rules: all('SELECT r.*, n.label AS number_label FROM ig_rules r LEFT JOIN numbers n ON n.id = r.number_id ORDER BY r.id DESC'),
+    comments: all('SELECT * FROM ig_comments ORDER BY created_at DESC LIMIT 50'),
+  })
+})
+
+const igRule = z.object({
+  number_id: z.number().int().nullable().default(null), keywords: z.string().trim().min(1).max(300),
+  reply: z.string().trim().min(1).max(1000), public_reply: z.string().max(300).default(''), active: z.boolean().default(true),
+})
+
+api.post('/ig-rules', requireAdmin, (req, res) => {
+  const b = body(igRule, req)
+  run('INSERT INTO ig_rules (number_id, keywords, reply, public_reply, active) VALUES (?, ?, ?, ?, ?)', b.number_id, b.keywords, b.reply, b.public_reply, b.active ? 1 : 0)
+  res.json({ ok: true })
+})
+
+api.put('/ig-rules/:id', requireAdmin, (req, res) => {
+  const b = body(igRule, req)
+  run('UPDATE ig_rules SET number_id = ?, keywords = ?, reply = ?, public_reply = ?, active = ? WHERE id = ?',
+    b.number_id, b.keywords, b.reply, b.public_reply, b.active ? 1 : 0, Number(req.params.id))
+  res.json({ ok: true })
+})
+
+api.delete('/ig-rules/:id', requireAdmin, (req, res) => {
+  run('DELETE FROM ig_rules WHERE id = ?', Number(req.params.id))
+  res.json({ ok: true })
+})
+
 // ---------- Instructor payroll (admin only) ----------
 
 api.get('/payroll', requireAdmin, (_req, res) => {
@@ -696,7 +825,8 @@ api.get('/contacts', (req, res) => {
        (SELECT COUNT(*) FROM conversations c WHERE c.contact_id = ct.id) AS conversations,
        (SELECT GROUP_CONCAT(DISTINCT n.label) FROM conversations c JOIN numbers n ON n.id = c.number_id WHERE c.contact_id = ct.id) AS numbers,
        (SELECT MAX(c.last_message_at) FROM conversations c WHERE c.contact_id = ct.id) AS last_message_at,
-       (SELECT COALESCE(SUM(amount), 0) FROM deals d WHERE d.contact_id = ct.id AND d.stage = 'won') AS won_amount
+       (SELECT COALESCE(SUM(amount), 0) FROM deals d WHERE d.contact_id = ct.id AND d.stage = 'won') AS won_amount,
+       (SELECT GROUP_CONCAT(tag, '、') FROM contact_tags g WHERE g.contact_id = ct.id) AS tags
      FROM contacts ct LEFT JOIN users u ON u.id = ct.owner_id
      WHERE ct.name LIKE ?1 OR ct.saved_name LIKE ?1 OR ct.wa_name LIKE ?1 OR ct.phone LIKE ?1 OR (?1 = '%')
      ORDER BY last_message_at DESC NULLS LAST LIMIT 500`,

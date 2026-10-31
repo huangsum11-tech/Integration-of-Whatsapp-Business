@@ -69,7 +69,7 @@ export default function Contacts() {
       <div className="card" style={{ overflowX: 'auto' }}>
         <table className="table">
           <thead>
-            <tr><th>客戶</th><th>電話</th><th>聯絡過的號碼</th><th>負責同事</th><th className="num">已成交</th><th>最近聯絡</th></tr>
+            <tr><th>客戶</th><th>電話</th><th>聯絡過的號碼</th><th>標籤</th><th>負責同事</th><th className="num">已成交</th><th>最近聯絡</th></tr>
           </thead>
           <tbody>
             {contacts.map((c) => {
@@ -97,6 +97,7 @@ export default function Contacts() {
                   </td>
                   <td className="num muted">{c.instagram ? <span className="faint">Instagram</span> : formatPhone(c.phone) || <span className="faint">號碼未同步</span>}</td>
                   <td>{c.numbers?.split(',').map((n) => <span key={n} className="number-tag" style={{ marginRight: 4 }}>{n}</span>)}</td>
+                  <td>{c.tags?.split('、').map((t) => <span key={t} className="chip" style={{ marginRight: 4 }}>{t}</span>)}</td>
                   <td>{owner ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Avatar name={owner.name} color={owner.color} size={20} />{owner.name}{!owner.active && <span className="chip">已離職</span>}</span> : <span className="faint">—</span>}</td>
                   <td className="num">{c.won_amount ? money(c.won_amount) : <span className="faint">—</span>}</td>
                   <td className="muted">{c.last_message_at ? timeLabel(c.last_message_at) : '—'}</td>

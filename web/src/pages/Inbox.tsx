@@ -19,6 +19,7 @@ interface Detail {
   contact: Contact
   deals: Deal[]
   trials: Trial[]
+  tags: string[]
   otherConversations: { id: number; last_message_at: number; last_preview: string; number_label: string }[]
   timeline: (Message | InboxEvent)[]
   canSend: boolean
@@ -486,6 +487,7 @@ function SidePanel({ detail, reload }: { detail: Detail; reload: () => void }) {
           onBlur={() => notes !== contact.notes && saveContact({ notes })} placeholder="喜好、地址、注意事項…全公司共用" />
       </div>
 
+      <TagSection detail={detail} reload={reload} />
       <TrialSection detail={detail} reload={reload} />
 
       <div className="side-section">
@@ -575,6 +577,33 @@ function TrialSection({ detail, reload }: { detail: Detail; reload: () => void }
         <button className="btn sm" disabled={!at} onClick={add} aria-label="記錄試堂"><Icon name="plus" size={15} /></button>
       </div>
       {error && <div className="error" style={{ fontSize: 12 }}>{error}</div>}
+    </div>
+  )
+}
+
+function TagSection({ detail, reload }: { detail: Detail; reload: () => void }) {
+  const [tag, setTag] = useState('')
+  const [known, setKnown] = useState<{ tag: string }[]>([])
+  useEffect(() => { api<{ tag: string }[]>('/tags').then(setKnown) }, [detail.contact.id])
+  const save = (tags: string[]) => api(`/contacts/${detail.contact.id}/tags`, { method: 'PUT', body: { tags } }).then(reload)
+  const add = () => { if (tag.trim()) { save([...detail.tags, tag.trim()]); setTag('') } }
+  return (
+    <div className="side-section">
+      <h3>標籤</h3>
+      <div className="tag-list">
+        {detail.tags.map((t) => (
+          <span key={t} className="chip pine">{t}
+            <button className="tag-x" onClick={() => save(detail.tags.filter((x) => x !== t))} aria-label={`移除 ${t}`}><Icon name="x" size={11} /></button>
+          </span>
+        ))}
+        {detail.tags.length === 0 && <span className="faint" style={{ fontSize: 13 }}>未有標籤。用來分組群發，例如「會員」「產前」。</span>}
+      </div>
+      <div className="inline-form">
+        <input className="input" list="known-tags" placeholder="加入標籤" value={tag} onChange={(e) => setTag(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && add()} />
+        <datalist id="known-tags">{known.filter((k) => !detail.tags.includes(k.tag)).map((k) => <option key={k.tag} value={k.tag} />)}</datalist>
+        <button className="btn sm" disabled={!tag.trim()} onClick={add} aria-label="加入標籤"><Icon name="plus" size={15} /></button>
+      </div>
     </div>
   )
 }

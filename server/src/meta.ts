@@ -4,6 +4,7 @@
  * /webhooks/meta, and send replies with an access token stored on the number.
  */
 import crypto from 'node:crypto'
+import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import path from 'node:path'
 import { get, run } from './db.js'
@@ -114,7 +115,28 @@ export async function sendInstagramText(numberId: number, conversationId: number
   return data.message_id
 }
 
+/**
+ * Answer an Instagram comment with a private message (DM) to the person who wrote it.
+ * Meta allows one private reply per comment, within 7 days of the comment.
+ */
+export async function sendInstagramPrivateReply(numberId: number, commentId: string, text: string) {
+  const config = numberConfig<InstagramConfig>(numberId)
+  return graph<{ recipient_id?: string; message_id?: string }>(`${IG}/${encodeURIComponent(config.igUserId)}/messages`, config.accessToken, {
+    method: 'POST',
+    body: { recipient: { comment_id: commentId }, message: { text } },
+  })
+}
+
+/** A public answer under the comment, e.g. "已私訊你 😊". */
+export async function replyToInstagramComment(numberId: number, commentId: string, text: string) {
+  const config = numberConfig<InstagramConfig>(numberId)
+  return graph(`${IG}/${encodeURIComponent(commentId)}/replies`, config.accessToken, { method: 'POST', body: { message: text } })
+}
+
 // ---------- Webhook ----------
+
+/** Emits 'instagram-comment' ({ numberId, igUserId, comment }) for each new comment on the business's posts. */
+export const metaEvents = new EventEmitter()
 
 /** Meta signs each delivery with the app secret; reject anything that doesn't match. */
 export function validSignature(rawBody: Buffer | undefined, header: string | undefined) {
@@ -184,6 +206,13 @@ export function handleWebhook(payload: any) {
         const value = change.value ?? {}
         const numberId = numberFor('wa_cloud', 'phoneNumberId', String(value.metadata?.phone_number_id ?? ''))
         if (!numberId) continue
+        // Delivery and read receipts for messages we sent, e.g. broadcasts.
+        for (const st of (value.statuses ?? []) as { id: string; status: string; timestamp: string; errors?: { title?: string }[] }[]) {
+          const ts = Number(st.timestamp)
+          if (st.status === 'delivered') run('UPDATE campaign_recipients SET delivered_at = COALESCE(delivered_at, ?) WHERE wa_id = ?', ts, st.id)
+          if (st.status === 'read') run('UPDATE campaign_recipients SET read_at = COALESCE(read_at, ?), delivered_at = COALESCE(delivered_at, ?) WHERE wa_id = ?', ts, ts, st.id)
+          if (st.status === 'failed') run("UPDATE campaign_recipients SET status = 'failed', error = ? WHERE wa_id = ?", st.errors?.[0]?.title ?? 'WhatsApp 未能送達', st.id)
+        }
         const names = new Map<string, string>((value.contacts ?? []).map((c: any) => [c.wa_id, c.profile?.name]))
         for (const m of (value.messages ?? []) as CloudMessage[]) {
           const described = describeCloud(m)
@@ -204,6 +233,9 @@ export function handleWebhook(payload: any) {
     for (const entry of payload.entry ?? []) {
       const numberId = numberFor('instagram', 'igUserId', String(entry.id ?? ''))
       if (!numberId) continue
+      for (const change of entry.changes ?? []) {
+        if (change.field === 'comments' && change.value?.id) metaEvents.emit('instagram-comment', { numberId, igUserId: String(entry.id), comment: change.value })
+      }
       for (const event of (entry.messaging ?? []) as InstagramEvent[]) {
         const m = event.message
         if (!m?.mid || m.is_deleted) continue

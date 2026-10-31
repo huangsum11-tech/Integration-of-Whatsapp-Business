@@ -209,6 +209,70 @@ CREATE TABLE IF NOT EXISTS quick_replies (
   body TEXT NOT NULL
 );
 
+-- Customer labels for broadcasts, e.g. "會員", "產前".
+CREATE TABLE IF NOT EXISTS contact_tags (
+  contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+  tag TEXT NOT NULL,
+  PRIMARY KEY (contact_id, tag)
+);
+
+-- Broadcasts: one message to a group of customers, sent one by one.
+CREATE TABLE IF NOT EXISTS campaigns (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  number_id INTEGER REFERENCES numbers(id),
+  -- {"segment": "all", "tags": ["會員"]}
+  audience TEXT NOT NULL DEFAULT '{}',
+  message TEXT NOT NULL DEFAULT '',
+  wa_template_name TEXT NOT NULL DEFAULT '',
+  wa_template_language TEXT NOT NULL DEFAULT 'zh_HK',
+  wa_template_params TEXT NOT NULL DEFAULT '',
+  -- What the AI should know while the promotion runs, so it can answer replies.
+  ai_note TEXT NOT NULL DEFAULT '',
+  ai_until INTEGER,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','scheduled','sending','sent')),
+  scheduled_at INTEGER,
+  created_by INTEGER REFERENCES users(id),
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  sent_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS campaign_recipients (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sent','failed')),
+  error TEXT,
+  wa_id TEXT,
+  sent_at INTEGER,
+  delivered_at INTEGER,
+  read_at INTEGER,
+  UNIQUE (campaign_id, contact_id)
+);
+CREATE INDEX IF NOT EXISTS campaign_recipients_wa ON campaign_recipients (wa_id);
+
+-- Instagram: a comment containing a keyword gets an automatic private reply (DM).
+CREATE TABLE IF NOT EXISTS ig_rules (
+  id INTEGER PRIMARY KEY,
+  number_id INTEGER REFERENCES numbers(id),
+  keywords TEXT NOT NULL,
+  reply TEXT NOT NULL,
+  public_reply TEXT NOT NULL DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
+  hits INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE TABLE IF NOT EXISTS ig_comments (
+  comment_id TEXT PRIMARY KEY,
+  number_id INTEGER REFERENCES numbers(id),
+  rule_id INTEGER REFERENCES ig_rules(id) ON DELETE SET NULL,
+  from_id TEXT,
+  username TEXT,
+  text TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'ignored' CHECK (status IN ('ignored','sent','failed')),
+  error TEXT,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
 -- Instructors who receive a monthly payslip. name must match the name in the Vibefam report.
 CREATE TABLE IF NOT EXISTS instructors (
   id INTEGER PRIMARY KEY,

@@ -7,6 +7,7 @@ import Assistant from './pages/Assistant'
 import Automation from './pages/Automation'
 import Contacts from './pages/Contacts'
 import Inbox from './pages/Inbox'
+import Marketing from './pages/Marketing'
 import Numbers from './pages/Numbers'
 import Payroll from './pages/Payroll'
 import Team from './pages/Team'
@@ -28,6 +29,7 @@ const ROUTES: { path: string; label: string; icon: IconName; admin?: boolean }[]
   { path: 'contacts', label: '聯絡簿', icon: 'contacts' },
   { path: 'analytics', label: '分析', icon: 'chart' },
   { path: 'ai', label: 'AI 助手', icon: 'sparkle' },
+  { path: 'marketing', label: '推廣', icon: 'megaphone', admin: true },
   { path: 'automation', label: '自動化', icon: 'clock' },
   { path: 'payroll', label: '糧單', icon: 'wallet', admin: true },
   { path: 'numbers', label: '號碼', icon: 'phone' },
@@ -115,6 +117,7 @@ function Shell({ me, setMe, onLogout }: { me: User; setMe: (u: User) => void; on
           {page === 'analytics' && <Analytics />}
           {page === 'ai' && <Assistant />}
           {page === 'automation' && <Automation />}
+          {page === 'marketing' && <Marketing />}
           {page === 'payroll' && <Payroll />}
           {page === 'numbers' && <Numbers />}
           {page === 'team' && <Team />}

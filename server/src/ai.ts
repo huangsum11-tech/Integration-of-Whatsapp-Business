@@ -4,6 +4,7 @@
  * - customer replies the AI sends or suggests on its own, with a handoff to a human
  *   whenever the knowledge base doesn't cover the question.
  */
+import { activePromotions } from './campaigns.js'
 import { CONTACT_NAME_SQL, all, get, getSetting } from './db.js'
 import { AiUnavailableError, generate } from './llm.js'
 import { formatLocal, parseLocal } from './time.js'
@@ -27,6 +28,7 @@ export function knowledgeContext(): string {
     entries.length
       ? `<knowledge>\n${entries.map((e) => `<entry type="${CATEGORY_LABEL[e.category] ?? e.category}" title="${e.title}">\n${e.body}\n</entry>`).join('\n')}\n</knowledge>`
       : '<knowledge>（知識庫暫時是空的）</knowledge>',
+    ...activePromotions().map((p) => `<current_promotion name="${p.name}">\n${p.ai_note}\n</current_promotion>`),
   ].join('\n\n')
 }
 

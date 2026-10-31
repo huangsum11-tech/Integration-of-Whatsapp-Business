@@ -69,13 +69,17 @@ export async function sendToPhone(numberId: number, phone: string, text: string,
     ts: Math.floor(Date.now() / 1000), live: true,
   }
   if (number.demo) {
-    storeMessage({ ...message, waId: `demo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })
+    const waId = `demo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    storeMessage({ ...message, waId })
+    return waId
   } else if (number.channel === 'wa_web') {
-    await sendText(numberId, jid, text, opts.userId, false)
+    return await sendText(numberId, jid, text, opts.userId, false)
   } else if (number.channel === 'wa_cloud') {
     if (!opts.template?.name) throw new Error('官方 Cloud API 主動發訊息需要已審批的模板，請在設定填寫模板名稱')
     if (number.status !== 'connected') throw new Error('此號碼未連接')
-    storeMessage({ ...message, waId: await sendCloudTemplate(numberId, pn, opts.template) })
+    const waId = await sendCloudTemplate(numberId, pn, opts.template)
+    storeMessage({ ...message, waId })
+    return waId
   } else {
     throw new Error('Instagram 不能主動發訊息給電話號碼，請選 WhatsApp 號碼')
   }

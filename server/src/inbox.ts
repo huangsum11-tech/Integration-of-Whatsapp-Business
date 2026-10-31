@@ -129,6 +129,9 @@ function mergeContacts(fromId: number, intoId: number) {
     from.name, from.saved_name, from.wa_name, from.owner_id, from.lid, from.notes, from.notes, from.notes, intoId,
   )
   run('UPDATE deals SET contact_id = ? WHERE contact_id = ?', intoId, fromId)
+  run('UPDATE trials SET contact_id = ? WHERE contact_id = ?', intoId, fromId)
+  run('UPDATE OR IGNORE contact_tags SET contact_id = ? WHERE contact_id = ?', intoId, fromId)
+  run('UPDATE OR IGNORE campaign_recipients SET contact_id = ? WHERE contact_id = ?', intoId, fromId)
   for (const c of all<{ id: number; number_id: number }>('SELECT id, number_id FROM conversations WHERE contact_id = ?', fromId)) {
     const twin = get<{ id: number }>('SELECT id FROM conversations WHERE contact_id = ? AND number_id = ?', intoId, c.number_id)
     if (twin) mergeConversations(c.id, twin.id)
