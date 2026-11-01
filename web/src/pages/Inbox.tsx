@@ -4,6 +4,7 @@ import { useApp } from '../App'
 import { Avatar, Icon, Modal } from '../components'
 import { clock, dayLabel, formatPhone, money, timeLabel } from '../format'
 import { getSocket } from '../socket'
+import { CHANNEL_ICON } from './Today'
 
 type View = 'human' | 'all' | 'mine' | 'unassigned' | 'closed'
 const VIEWS: { id: View; label: string }[] = [
@@ -30,6 +31,8 @@ export default function Inbox({ conversationId }: { conversationId: number | nul
   const [view, setView] = useState<View>('all')
   const [numberId, setNumberId] = useState<number | ''>('')
   const [q, setQ] = useState('')
+  // One inbox for every channel; the chips narrow it to one.
+  const [channelFilter, setChannelFilter] = useState<'all' | 'whatsapp' | 'instagram' | 'messenger' | 'threads'>('all')
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [counts, setCounts] = useState<Record<View, number>>({ human: 0, all: 0, mine: 0, unassigned: 0, closed: 0 })
   const [detail, setDetail] = useState<Detail | null>(null)
@@ -87,6 +90,10 @@ export default function Inbox({ conversationId }: { conversationId: number | nul
   }, [conversationId, loadList, loadDetail])
 
   const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
+  const group = (c: Conversation) => (c.channel === 'wa_web' || c.channel === 'wa_cloud' ? 'whatsapp' : c.channel)
+  const present = [...new Set(numbers.map((n) => (n.channel === 'wa_web' || n.channel === 'wa_cloud' ? 'whatsapp' : n.channel)))]
+  const shown = channelFilter === 'all' ? conversations : conversations.filter((c) => group(c) === channelFilter)
+  const CHIP: Record<string, string> = { whatsapp: 'WhatsApp', instagram: 'Instagram', messenger: 'Facebook', threads: 'Threads' }
 
   return (
     <div className={`inbox ${conversationId ? 'has-active' : ''}`}>
@@ -107,19 +114,33 @@ export default function Inbox({ conversationId }: { conversationId: number | nul
               </button>
             ))}
           </div>
+          {present.length > 1 && (
+            <div className="channel-chips" role="group" aria-label="渠道">
+              {(['all', ...present] as const).map((ch) => (
+                <button key={ch} className={`channel-chip ${channelFilter === ch ? 'active' : ''}`} aria-pressed={channelFilter === ch}
+                  onClick={() => setChannelFilter(ch as typeof channelFilter)}>
+                  {ch !== 'all' && <Icon name={ch === 'whatsapp' ? 'phone' : CHANNEL_ICON[ch as 'instagram']} size={13} />}
+                  {ch === 'all' ? '全部渠道' : CHIP[ch]}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="search">
             <Icon name="search" size={16} />
             <input className="input" placeholder="搜尋客戶名稱或電話" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
         </div>
         <div className="conv-list">
-          {conversations.length === 0 && <div className="empty" style={{ height: 200 }}>這裏暫時沒有對話</div>}
-          {conversations.map((c) => {
+          {shown.length === 0 && <div className="empty" style={{ height: 200 }}>這裏暫時沒有對話</div>}
+          {shown.map((c) => {
             const assignee = c.assignee_id ? userById.get(c.assignee_id) : undefined
             return (
               <button key={c.id} className={`conv ${c.id === conversationId ? 'active' : ''} ${c.unread ? 'unread' : ''}`}
                 onClick={() => { window.location.hash = `#/inbox/${c.id}` }}>
-                <Avatar name={c.contact_name} size={40} />
+                <span className="avatar-wrap">
+                  <Avatar name={c.contact_name} size={40} />
+                  <span className="channel-badge" title={CHANNEL_LABEL[c.channel]}><Icon name={CHANNEL_ICON[c.channel]} size={11} /></span>
+                </span>
                 <div style={{ minWidth: 0 }}>
                   <div className="name">{c.contact_name}</div>
                   <div className="preview">{c.last_preview || ' '}</div>

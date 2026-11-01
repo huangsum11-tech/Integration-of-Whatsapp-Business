@@ -6,7 +6,7 @@
 
 > **第一次設定？** 請看 **[完整設定指南 docs/SETUP.md](docs/SETUP.md)**（本機或雲端安裝、Meta App、WhatsApp／IG／Facebook／Threads 逐步連接、App 審查、AI 設定及上線次序）：連接 WhatsApp／Instagram 官方 API、連接及轉換 AI 和模型、知識庫範本（[`docs/knowledge-template.csv`](docs/knowledge-template.csv)）及資料存放位置、轉用人工時在哪裡回覆客人。
 
-![收件匣](docs/screenshots/inbox.png)
+![今日](docs/screenshots/today.png)
 
 ## 核心功能
 
@@ -16,14 +16,14 @@
 | **自動備份** | 每個已連接號碼的訊息（包括連接時同步的對話紀錄）寫入 SQLite；相片、影片、語音與文件下載到 `data/media/`；全文搜尋（FTS5 trigram，中英文都搜得到）。 |
 | **AI 輔助回覆** | AI 從同事**實際發出**的回覆學習語氣（加上同事自己寫的風格說明），按對話內容和知識庫草擬回覆。同事檢查、修改後才發送，訊息會標示「AI 草擬」。 |
 | **AI 自動回覆** | 每個號碼可設定「關閉／AI 建議／全自動」。常見問題按關鍵字直接用團隊寫好的答案回覆（不經 AI）；其他問題由 AI 根據知識庫回答；知識庫沒有的資料、預約／退款等要人手處理的事、投訴或要求真人時，轉交同事。同事一回覆，AI 就在該對話暫停，直到按「恢復 AI」或對話完成。 |
-| **知識庫** | 「AI 助手」頁面管理公司資料、常見問題、政策和課程資料；可以用 Excel／Google Sheets 編輯 CSV 再匯入或匯出；附普拉提／健身室範本；可以「試問 AI」預覽回答。 |
+| **知識庫** | 「設定 → AI 及知識庫」頁面管理公司資料、常見問題、政策和課程資料；可以用 Excel／Google Sheets 編輯 CSV 再匯入或匯出；附普拉提／健身室範本；可以「試問 AI」預覽回答。 |
 | **導師糧單** | 上載從 Vibefam 匯出的每月糧單報表（CSV），自動按導師整理、套用訊息範本，預覽後經 WhatsApp 逐一發給導師（即時或排程）；每月最後一日用 WhatsApp 提醒管理員上載。糧單對話只有管理員看到。 |
 | **試堂流程** | AI 給新客人試堂預約連結（舊學生給一般預約連結）；客人告訴 AI 試堂時間後自動記錄；上堂後（預設 2 小時）自動發跟進訊息。 |
 | **不漏客** | 客人等待太耐，WhatsApp 提醒負責同事；快速回覆（`/捷徑`）；語音訊息自動轉文字（Gemini）。 |
 | **推廣** | 客人標籤及分組、WhatsApp 群發（即時／排程、測試、送達／已讀／回覆統計、AI 自動解答優惠）、IG 留言關鍵字自動私訊、匯入客人名單。 |
 | **管理** | 每週 WhatsApp 營運報告、Google 評價邀請、一次通知多位導師。 |
 | **待人工** | AI 轉交的對話集中在收件匣「待人工」分頁，同事直接在 Baton 回覆，訊息經原本的 WhatsApp／Instagram 發給客人。 |
-| **多種 AI** | Claude、Gemini、Grok 任選，在「AI 助手」頁面切換；API 金鑰只放在伺服器環境變數。 |
+| **多種 AI** | Claude、Gemini、Grok 任選，在「設定 → AI 及知識庫」頁面切換；API 金鑰只放在伺服器環境變數。 |
 | **四個渠道** | WhatsApp Cloud API、Instagram、Facebook Messenger 經同一個 webhook 進入收件匣；Threads 帖子留言每 3 分鐘讀取一次並公開回覆。也支援 QR 連接的 WhatsApp。號碼頁有設定清單，顯示仍未完成的步驟。 |
 | **業務延續** | 「離職交接」即時停用登入，進行中的對話、負責的客戶及跟進中交易轉交接手同事；所有紀錄保留。 |
 | **管理層分析** | 回覆速度（中位數）、每日訊息量、每位同事及每個號碼的表現、成交金額。 |
@@ -82,6 +82,7 @@ server/src/
   comments.ts    IG／FB 留言關鍵字自動私訊
   tokens.ts      Instagram／Threads 權杖自動更新
   setup.ts       設定清單
+  home.ts        「今日」頁：需要處理的客人、今日時間表、渠道狀態
   knowledge.ts   知識庫 CSV 匯入／匯出
   payroll.ts     導師糧單：讀取 Vibefam 報表、發送、排程、月底提醒
   automation.ts  試堂紀錄及跟進、客人等待提醒
@@ -95,7 +96,8 @@ server/src/
   seed.ts        示範資料
 web/src/
   App.tsx        登入、導航、全域狀態
-  pages/         Inbox、Contacts、Analytics、Assistant（AI 助手）、Marketing（推廣）、Automation（自動化）、Payroll（糧單）、Numbers、Team
+  pages/         Today（今日）、Inbox、Customers（客人：Contacts＋試堂＋匯入）、Marketing（推廣）、Payroll（導師）、
+                 Settings（設定：Numbers 渠道、Assistant AI、Automation 自動化、Team 團隊）、Analytics
 ```
 
 ## 開始使用
@@ -141,7 +143,7 @@ npm run dev    # 前端 http://localhost:5173
 | `ANTHROPIC_API_KEY` | | 使用 Claude |
 | `GEMINI_API_KEY` | | 使用 Gemini |
 | `XAI_API_KEY` | | 使用 Grok |
-| `BATON_AI_MODEL` | `claude-opus-5-5` | Claude 的預設模型（可在「AI 助手」頁面改） |
+| `BATON_AI_MODEL` | `claude-opus-5-5` | Claude 的預設模型（可在「設定 → AI 及知識庫」頁面改） |
 | `BATON_AI_DELAY_MS` | `8000` | 客人停止打字多久後才自動回覆（毫秒），避免逐句回覆 |
 | `META_VERIFY_TOKEN` | | 自訂字串，在 Meta App 設定 webhook 時填同一個值 |
 | `META_APP_SECRET` | | Meta App 密鑰，用來驗證 webhook 簽名（正式使用必須設定） |
@@ -175,8 +177,10 @@ npm run dev    # 前端 http://localhost:5173
 | ![](docs/screenshots/login.png) | ![](docs/screenshots/analytics.png) |
 | **號碼（設定清單、連接渠道）** | **團隊（離職交接、AI 語氣）** |
 | ![](docs/screenshots/numbers.png) | ![](docs/screenshots/team.png) |
-| **AI 助手（知識庫、試問 AI、選擇 AI）** | **導師糧單** |
-| ![](docs/screenshots/assistant.png) | ![](docs/screenshots/payroll.png) |
+| **今日（需要處理、時間表、渠道狀態）** | **導師糧單** |
+| ![](docs/screenshots/today.png) | ![](docs/screenshots/payroll.png) |
+| **設定 → AI 及知識庫** | |
+| ![](docs/screenshots/assistant.png) | |
 | **推廣（群發）** | |
 | ![](docs/screenshots/marketing.png) | |
 

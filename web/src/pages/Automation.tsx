@@ -42,12 +42,11 @@ export default function Automation() {
       <div className="page-head">
         <div>
           <h1>自動化</h1>
-          <p>試堂跟進、客人等待提醒及快速回覆。</p>
+          <p>試堂跟進、客人等待提醒、每週報告、快速回覆及 Google 評價邀請。試堂名單在「客人」頁。</p>
         </div>
       </div>
       <div className="ai-grid">
         <div className="ai-col">
-          <TrialsCard trials={data.trials} />
           <QuickRepliesCard isAdmin={isAdmin} />
           <ReviewCard review={data.review} isAdmin={isAdmin} onSaved={load} />
         </div>
@@ -68,7 +67,7 @@ export default function Automation() {
   )
 }
 
-function TrialsCard({ trials }: { trials: Overview['trials'] }) {
+export function TrialsCard({ trials }: { trials: Overview['trials'] }) {
   const now = Date.now() / 1000
   const upcoming = trials.filter((t) => t.class_at >= now && t.status === 'booked').reverse()
   const recent = trials.filter((t) => t.class_at < now || t.status !== 'booked')

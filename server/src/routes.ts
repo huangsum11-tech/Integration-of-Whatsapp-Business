@@ -27,6 +27,7 @@ import {
 import { handleWebhook, subscribeWebhooks, validSignature, verifyCloud, verifyInstagram, verifyMessenger } from './meta.js'
 import { verifyThreads } from './threads.js'
 import { setupStatus } from './setup.js'
+import { homeData } from './home.js'
 import { broadcast } from './realtime.js'
 import { MEDIA_DIR, connectNumber, currentQr, disconnectNumber, isConnected, syncContacts } from './whatsapp.js'
 
@@ -272,6 +273,8 @@ api.post('/numbers/:id/sync-contacts', requireAdmin, async (req, res) => {
 })
 
 api.get('/setup-status', (_req, res) => res.json(setupStatus()))
+
+api.get('/home', (req, res) => res.json(homeData(req.user.id, req.user.role === 'admin')))
 
 // ---------- Inbox ----------
 

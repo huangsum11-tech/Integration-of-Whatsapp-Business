@@ -27,23 +27,22 @@ const when = (ts: number) => new Date(ts * 1000).toLocaleString('zh-HK', { month
 const dateInput = (ts: number | null) => (ts ? new Date(ts * 1000).toISOString().slice(0, 10) : '')
 
 export default function Marketing() {
-  const [tab, setTab] = useState<'broadcast' | 'instagram' | 'customers'>('broadcast')
+  const [tab, setTab] = useState<'broadcast' | 'instagram'>('broadcast')
   return (
     <div className="page">
       <div className="page-head">
         <div>
           <h1>推廣</h1>
-          <p>WhatsApp 群發優惠及消息、Instagram／Facebook 留言自動私訊、客人分組。</p>
+          <p>WhatsApp 群發優惠及消息、Instagram／Facebook 留言自動私訊。客人標籤及匯入名單在「客人」頁。</p>
         </div>
       </div>
-      <div className="tabs" role="tablist" style={{ maxWidth: 480, marginBottom: 20 }}>
-        {([['broadcast', 'WhatsApp 群發'], ['instagram', 'IG／FB 留言自動私訊'], ['customers', '客人名單']] as const).map(([id, label]) => (
+      <div className="tabs" role="tablist" style={{ maxWidth: 360, marginBottom: 20 }}>
+        {([['broadcast', 'WhatsApp 群發'], ['instagram', 'IG／FB 留言自動私訊']] as const).map(([id, label]) => (
           <button key={id} role="tab" aria-selected={tab === id} className={`tab ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>{label}</button>
         ))}
       </div>
       {tab === 'broadcast' && <Broadcasts />}
       {tab === 'instagram' && <InstagramRules />}
-      {tab === 'customers' && <Customers />}
     </div>
   )
 }
@@ -393,7 +392,7 @@ function InstagramRules() {
 
 // ---------- Customers: tags and import ----------
 
-function Customers() {
+export function CustomerImport() {
   const [tags, setTags] = useState<{ tag: string; count: number }[]>([])
   const [tag, setTag] = useState('')
   const [msg, setMsg] = useState('')

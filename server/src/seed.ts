@@ -126,6 +126,21 @@ tx(() => {
     run('INSERT INTO knowledge (category, title, body, keywords) VALUES (?, ?, ?, ?)', category, title, body, keywords)
   }
   run("UPDATE numbers SET reply_mode = 'suggest' WHERE id = ?", service)
+
+  // Today: two trial classes (one done, one later), and a customer the AI handed to the team.
+  const hour = 3600
+  const trial = (conv: number, at: number, name: string, followup: string) => {
+    const contact = get<{ contact_id: number }>('SELECT contact_id FROM conversations WHERE id = ?', conv)!.contact_id
+    run(`INSERT INTO trials (contact_id, conversation_id, class_at, class_name, source, followup_status, followup_at)
+         VALUES (?, ?, ?, ?, 'ai', ?, ?)`, contact, conv, at, name, followup, followup === 'sent' ? at + 2 * hour : null)
+  }
+  trial(conversationIds[2], now - 3 * hour, 'Reformer 初班', 'sent')
+  trial(conversationIds[6], now + 2 * hour, 'Mat Pilates', 'pending')
+  run("UPDATE numbers SET reply_mode = 'auto' WHERE id = ?", sales)
+  run('UPDATE conversations SET needs_human = 1, ai_paused = 1 WHERE id = ?', conversationIds[3])
+  run("INSERT INTO events (conversation_id, kind, body, ts) VALUES (?, 'ai_handoff', '客人想改期', ?)", conversationIds[3], now - 20 * 60)
+  run(`INSERT INTO campaigns (name, number_id, audience, message, status, scheduled_at, created_by)
+       VALUES ('12 月 Reformer 套票優惠', ?, '{"segment":"all","tags":[]}', '{名稱} 你好！', 'scheduled', ?, ?)`, sales, now + 5 * hour, karen)
 })
 
 console.log('Demo data created. Log in with karen@baton.demo / baton-demo')

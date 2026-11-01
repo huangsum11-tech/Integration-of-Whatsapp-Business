@@ -59,7 +59,7 @@ export default function Numbers() {
     <div className="page">
       <div className="page-head">
         <div>
-          <h1>號碼與帳戶</h1>
+          <h1>渠道</h1>
           <p>連接 WhatsApp、Instagram、Facebook Messenger 和 Threads，並設定每個帳戶的 AI 回覆方式。</p>
         </div>
       </div>

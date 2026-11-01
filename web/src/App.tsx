@@ -1,16 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useState, type FormEvent } from 'react'
 import { api, ApiError, type User, type WaNumber } from './api'
-import { Icon, Logo, type IconName } from './components'
+import { Avatar, Icon, Logo, type IconName } from './components'
 import { closeSocket, getSocket } from './socket'
-import Analytics from './pages/Analytics'
-import Assistant from './pages/Assistant'
-import Automation from './pages/Automation'
-import Contacts from './pages/Contacts'
+import Customers from './pages/Customers'
 import Inbox from './pages/Inbox'
 import Marketing from './pages/Marketing'
-import Numbers from './pages/Numbers'
 import Payroll from './pages/Payroll'
-import Team from './pages/Team'
+import Settings from './pages/Settings'
+import Today from './pages/Today'
 
 interface AppState {
   me: User
@@ -24,20 +21,31 @@ interface AppState {
 const AppContext = createContext<AppState | null>(null)
 export const useApp = () => useContext(AppContext)!
 
+/** Six places: what needs doing today, conversations, customers, promotion, instructors, setup. */
 const ROUTES: { path: string; label: string; icon: IconName; admin?: boolean }[] = [
+  { path: 'today', label: '今日', icon: 'sun' },
   { path: 'inbox', label: '收件匣', icon: 'inbox' },
-  { path: 'contacts', label: '聯絡簿', icon: 'contacts' },
-  { path: 'analytics', label: '分析', icon: 'chart' },
-  { path: 'ai', label: 'AI 助手', icon: 'sparkle' },
+  { path: 'customers', label: '客人', icon: 'contacts' },
   { path: 'marketing', label: '推廣', icon: 'megaphone', admin: true },
-  { path: 'automation', label: '自動化', icon: 'clock' },
-  { path: 'payroll', label: '糧單', icon: 'wallet', admin: true },
-  { path: 'numbers', label: '號碼', icon: 'phone' },
-  { path: 'team', label: '團隊', icon: 'team' },
+  { path: 'instructors', label: '導師', icon: 'wallet', admin: true },
+  { path: 'settings', label: '設定', icon: 'gear' },
 ]
 
+/** Addresses from before everything moved into one place keep working. */
+const MOVED: Record<string, string> = {
+  contacts: 'customers', analytics: 'today/analytics', payroll: 'instructors',
+  ai: 'settings/ai', automation: 'settings/automation', numbers: 'settings/channels', team: 'settings/team',
+}
+
 function useRoute() {
-  const read = () => window.location.hash.replace(/^#\/?/, '').split('/')
+  const read = () => {
+    const parts = window.location.hash.replace(/^#\/?/, '').split('/')
+    if (MOVED[parts[0]]) {
+      window.location.replace(`#/${MOVED[parts[0]]}`)
+      return MOVED[parts[0]].split('/')
+    }
+    return parts
+  }
   const [route, setRoute] = useState(read)
   useEffect(() => {
     const onHash = () => setRoute(read())
@@ -72,7 +80,8 @@ function Shell({ me, setMe, onLogout }: { me: User; setMe: (u: User) => void; on
   const [unread, setUnread] = useState(0)
   const route = useRoute()
   const routes = ROUTES.filter((r) => !r.admin || me.role === 'admin')
-  const page = routes.some((r) => r.path === route[0]) ? route[0] : 'inbox'
+  const page = routes.some((r) => r.path === route[0]) ? route[0] : 'today'
+  const [menuOpen, setMenuOpen] = useState(false)
 
   const refreshUsers = useCallback(() => { api<User[]>('/users').then(setUsers) }, [])
   const refreshNumbers = useCallback(() => { api<WaNumber[]>('/numbers').then(setNumbers) }, [])
@@ -97,30 +106,36 @@ function Shell({ me, setMe, onLogout }: { me: User; setMe: (u: User) => void; on
     <AppContext.Provider value={{ me, users, numbers, refreshUsers, refreshNumbers, setMe }}>
       <div className="shell">
         <nav className="rail" aria-label="主選單">
-          <div className="logo"><Logo size={42} /></div>
+          <a className="logo" href="#/today" aria-label="Baton 今日"><Logo size={42} /></a>
           {routes.map((r) => (
-            <a key={r.path} href={`#/${r.path}`} className={`rail-btn ${page === r.path ? 'active' : ''}`} style={{ textDecoration: 'none' }}>
+            <a key={r.path} href={`#/${r.path}`} className={`rail-btn ${page === r.path ? 'active' : ''}`} aria-current={page === r.path ? 'page' : undefined}>
               <Icon name={r.icon} size={21} />
               {r.label}
               {r.path === 'inbox' && unread > 0 && <span className="dot">{unread}</span>}
             </a>
           ))}
           <div className="spacer" />
-          <button className="rail-btn" onClick={logout} title={`${me.name} — 登出`}>
-            <Icon name="logout" size={20} />
-            登出
-          </button>
+          <div className="me-menu">
+            <button className="rail-btn me-btn" onClick={() => setMenuOpen(!menuOpen)} aria-expanded={menuOpen} aria-label={`${me.name}：帳戶選單`}>
+              <Avatar name={me.name} color={me.color} size={30} />
+              <span className="me-name">{me.name.split(' ')[0]}</span>
+            </button>
+            {menuOpen && (
+              <div className="me-pop" role="menu">
+                <div className="me-pop-head"><b>{me.name}</b><span className="muted">{me.email}</span></div>
+                <a role="menuitem" href="#/settings/team" onClick={() => setMenuOpen(false)}><Icon name="user" size={16} />我的語氣及資料</a>
+                <button role="menuitem" onClick={logout}><Icon name="logout" size={16} />登出</button>
+              </div>
+            )}
+          </div>
         </nav>
         <main className="main">
+          {page === 'today' && <Today tab={route[1] === 'analytics' ? 'analytics' : 'today'} />}
           {page === 'inbox' && <Inbox conversationId={route[1] ? Number(route[1]) : null} />}
-          {page === 'contacts' && <Contacts />}
-          {page === 'analytics' && <Analytics />}
-          {page === 'ai' && <Assistant />}
-          {page === 'automation' && <Automation />}
+          {page === 'customers' && <Customers tab={route[1]} />}
           {page === 'marketing' && <Marketing />}
-          {page === 'payroll' && <Payroll />}
-          {page === 'numbers' && <Numbers />}
-          {page === 'team' && <Team />}
+          {page === 'instructors' && <Payroll />}
+          {page === 'settings' && <Settings section={route[1]} />}
         </main>
       </div>
     </AppContext.Provider>
