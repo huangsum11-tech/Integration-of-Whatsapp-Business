@@ -71,7 +71,7 @@ export default function Payments() {
             </button>
           ))}
         </div>
-        <div className="search" style={{ maxWidth: 280, flex: 1 }}>
+        <div className="search" style={{ minWidth: 200, maxWidth: 280, flex: 1 }}>
           <Icon name="search" size={16} />
           <input className="input" placeholder="搜尋參考編號、客人、電話" value={q} onChange={(e) => setQ(e.target.value)} aria-label="搜尋付款" />
         </div>

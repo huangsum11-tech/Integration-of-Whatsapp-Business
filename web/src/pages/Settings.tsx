@@ -1,6 +1,7 @@
 import { useApp } from '../App'
 import { Icon, type IconName } from '../components'
 import Assistant from './Assistant'
+import Backoffice from './Backoffice'
 import Brands from './Brands'
 import Automation from './Automation'
 import Numbers from './Numbers'
@@ -9,6 +10,7 @@ import Team from './Team'
 const SECTIONS: { id: string; label: string; hint: string; icon: IconName }[] = [
   { id: 'channels', label: '渠道', hint: 'WhatsApp、IG、FB、Threads', icon: 'phone' },
   { id: 'brands', label: '品牌及收款', hint: '價目、預約連結、FPS／PayMe', icon: 'card' },
+  { id: 'backoffice', label: '預約後台輔助', hint: '核實後代填加套票表格', icon: 'shield' },
   { id: 'ai', label: 'AI 及知識庫', hint: 'AI 模型、公司資料、預約連結', icon: 'sparkle' },
   { id: 'automation', label: '自動化', hint: '跟進、提醒、報告、快速回覆', icon: 'clock' },
   { id: 'team', label: '團隊', hint: '同事、交接、語氣', icon: 'team' },
@@ -33,6 +35,7 @@ export default function Settings({ section }: { section?: string }) {
       <div className="hub-body">
         {current.id === 'channels' && <Numbers />}
         {current.id === 'brands' && <Brands />}
+        {current.id === 'backoffice' && <Backoffice />}
         {current.id === 'ai' && <Assistant />}
         {current.id === 'automation' && <Automation />}
         {current.id === 'team' && <Team />}

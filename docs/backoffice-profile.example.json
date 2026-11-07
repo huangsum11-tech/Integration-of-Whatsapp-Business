@@ -1,0 +1,23 @@
+{
+  "login": {
+    "username": "input[type=\"email\"]",
+    "password": "input[type=\"password\"]",
+    "submit": "button[type=\"submit\"]",
+    "loggedIn": "text=Members"
+  },
+  "search": {
+    "url": "/members",
+    "input": "input[type=\"search\"]",
+    "results": "table tbody tr",
+    "empty": "text=No results"
+  },
+  "member": {
+    "open": "a",
+    "addPackage": "button:has-text(\"Add Package\")"
+  },
+  "form": {
+    "packageSelect": "select[name=\"package\"]",
+    "confirm": "button:has-text(\"Confirm\")"
+  },
+  "challenge": "captcha|recaptcha|驗證碼|verification code|two-factor|2FA"
+}

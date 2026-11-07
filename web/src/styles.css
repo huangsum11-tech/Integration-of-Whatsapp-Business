@@ -544,7 +544,7 @@ a.channel-strip.empty { color: var(--coral); border-color: #f3cfc5; }
 .input.cell, .select.cell { padding: 4px 8px; font-size: 13px; }
 .pay-summary { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 13px; color: var(--muted); }
 .pay-tools { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
-.pay-tools .tabs { flex: 0 1 auto; }
+.pay-tools .tabs { flex: 0 1 auto; max-width: 100%; overflow-x: auto; }
 .pay-list { display: flex; flex-direction: column; gap: 12px; }
 .pay-card { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
 .pay-shot { display: grid; place-items: center; background: var(--paper); border-radius: var(--radius-sm); min-height: 160px; font-size: 13px; text-align: center; padding: 8px; }
@@ -557,3 +557,16 @@ a.channel-strip.empty { color: var(--coral); border-color: #f3cfc5; }
   .pay-card { grid-template-columns: minmax(0, 1fr); }
   .pay-summary { align-items: flex-start; }
 }
+
+/* ---------- Back-office assist ---------- */
+.bo-status { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.bo-status li { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }
+.bo-status li svg { flex: none; margin-top: 2px; }
+.bo-status li.ok svg { color: var(--pine); }
+.bo-status li.todo svg { color: var(--coral); }
+.bo-runs { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.bo-runs > li { border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 4px; }
+.bo-run-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.bo-steps { margin: 4px 0 0; padding-left: 20px; font-size: 13px; display: grid; gap: 2px; }
+.bo-steps li.bad { color: var(--coral); }
+textarea.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; width: 100%; }

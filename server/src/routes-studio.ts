@@ -7,6 +7,7 @@ import path from 'node:path'
 import express, { type Request } from 'express'
 import { z } from 'zod'
 import { requireAdmin } from './auth.js'
+import { EXAMPLE_PROFILE, assistAddPackage, auditRuns, backofficeStatus, profile, saveProfile, screenshotPath } from './backoffice.js'
 import { brandById, brands, branchesOf, money, type Package } from './brands.js'
 import { all, get, getSetting, run, setSetting, tx } from './db.js'
 import { activeFlow, endFlow, flowSummary } from './flows.js'
@@ -230,3 +231,38 @@ studio.post('/payments/:id/return', act((req) => {
 studio.post('/payments/:id/credit', act((req) => credit(Number(req.params.id), req.user.id)))
 studio.post('/payments/:id/cancel', act((req) => cancel(Number(req.params.id), req.user.id, '同事取消')))
 
+
+// ---------- Booking-system back office: assist mode (stage 2) ----------
+
+studio.get('/backoffice/status', (_req, res) => {
+  res.json({ ...backofficeStatus(), profile: profile(), example: EXAMPLE_PROFILE })
+})
+
+studio.put('/backoffice/settings', requireAdmin, (req, res) => {
+  const sel = z.string().max(300)
+  const b = body(z.object({
+    enabled: z.boolean(),
+    profile: z.object({
+      login: z.object({ username: sel, password: sel, submit: sel, loggedIn: sel }),
+      search: z.object({ url: sel.optional(), input: sel, submit: sel.optional(), results: sel, empty: sel.optional() }),
+      member: z.object({ open: sel.optional(), addPackage: sel }),
+      form: z.object({ packageSelect: sel, confirm: sel }),
+      challenge: sel,
+    }).nullable(),
+  }), req)
+  setSetting('backoffice_enabled', b.enabled ? '1' : '0')
+  if (b.profile) saveProfile(b.profile)
+  res.json(backofficeStatus())
+})
+
+studio.post('/backoffice/add-package/:id', act((req) => assistAddPackage(Number(req.params.id), req.user.id)))
+
+studio.get('/backoffice/runs', (_req, res) => {
+  res.json({ runs: auditRuns() })
+})
+
+studio.get('/backoffice/screenshot', (req, res) => {
+  const file = screenshotPath(String(req.query.path ?? ''))
+  if (!file) return res.status(404).end()
+  res.sendFile(file)
+})
