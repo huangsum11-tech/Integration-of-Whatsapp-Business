@@ -146,6 +146,7 @@ export default function Inbox({ conversationId }: { conversationId: number | nul
                   <div className="preview">{c.last_preview || ' '}</div>
                   <div className="tags">
                     {c.needs_human ? <span className="chip coral" style={{ fontSize: 11, padding: '0 7px' }}>待人工</span> : null}
+                    {c.channel.startsWith('wa_') && !c.phone ? <span className="chip" style={{ fontSize: 11, padding: '0 7px' }} title="WhatsApp 只提供了 LID，未對應到電話號碼">號碼未解析</span> : null}
                     <span className="number-tag">{c.number_label}</span>
                     {assignee
                       ? <span className="faint" style={{ fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -254,7 +255,7 @@ function Thread({ detail }: { detail: Detail }) {
         <Avatar name={conversation.contact_name} size={40} />
         <div className="who">
           <b>{conversation.contact_name}</b>
-          <div className="muted" style={{ fontSize: 12 }}>{conversation.channel.startsWith('wa_') ? formatPhone(conversation.phone) || '號碼未同步' : CHANNEL_LABEL[conversation.channel]} · 經 <b style={{ fontWeight: 500 }}>{conversation.number_label}</b></div>
+          <div className="muted" style={{ fontSize: 12 }}>{conversation.channel.startsWith('wa_') ? formatPhone(conversation.phone) || '號碼未解析' : CHANNEL_LABEL[conversation.channel]} · 經 <b style={{ fontWeight: 500 }}>{conversation.number_label}</b></div>
         </div>
         {conversation.reply_mode === 'auto' && (
           <button className={`btn sm ${conversation.ai_paused ? '' : 'ai'}`} onClick={toggleAi}
@@ -482,10 +483,10 @@ function SidePanel({ detail, reload }: { detail: Detail; reload: () => void }) {
         <input className="input" style={{ textAlign: 'center', fontWeight: 700, fontSize: 16, border: '1px solid transparent' }}
           value={name} placeholder={contact.saved_name ?? contact.wa_name ?? '加入名稱'} onChange={(e) => setName(e.target.value)}
           onBlur={() => name !== (contact.name ?? '') && saveContact({ name: name || null })} aria-label="客戶名稱" />
-        <span className="muted">{contact.social ? `${contact.social} 用戶` : formatPhone(contact.phone) || '號碼未同步'}</span>
+        <span className="muted">{contact.social ? `${contact.social} 用戶` : formatPhone(contact.phone) || '號碼未解析'}</span>
         {contact.saved_name && contact.name && contact.saved_name !== contact.name && <span className="faint" style={{ fontSize: 12 }}>手機通訊錄：{contact.saved_name}</span>}
         {contact.wa_name && contact.wa_name !== (contact.name ?? contact.saved_name) && <span className="faint" style={{ fontSize: 12 }}>{contact.social ?? 'WhatsApp'} 名稱：{contact.wa_name}</span>}
-        {!contact.phone && !contact.social && <span className="faint" style={{ fontSize: 12, maxWidth: 240 }}>WhatsApp 暫時隱藏了此客戶的電話號碼，同步後會自動補上</span>}
+        {!contact.phone && !contact.social && <ResolveNumber numberId={conversation.number_id} onDone={reload} />}
       </div>
 
       <div className="side-section">
@@ -721,5 +722,27 @@ function StudioSection({ conversationId }: { conversationId: number }) {
       )}
       {error && <div className="error" style={{ fontSize: 12 }}>{error}</div>}
     </div>
+  )
+}
+
+/** WhatsApp gave only a LID: explain, and let a teammate ask the linked phone for the real number now. */
+function ResolveNumber({ numberId, onDone }: { numberId: number; onDone: () => void }) {
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+  const run = async () => {
+    setBusy(true); setMsg('')
+    try {
+      const r = await api<{ resolved: number; unresolved: number }>(`/numbers/${numberId}/sync-contacts`, { method: 'POST' })
+      setMsg(r.resolved ? `已補回 ${r.resolved} 個電話號碼` : '暫時未能對應，客人下次傳訊息時會再嘗試')
+      onDone()
+    } catch (err) { setMsg(err instanceof Error ? err.message : '同步失敗') }
+    finally { setBusy(false) }
+  }
+  return (
+    <span className="faint" style={{ fontSize: 12, maxWidth: 260, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+      WhatsApp 只提供了內部編號（LID），未對應到電話號碼。系統會自動再試；亦可以立即同步。
+      <button className="btn sm" disabled={busy} onClick={run}>{busy ? '同步中…' : '立即同步聯絡人'}</button>
+      {msg && <span>{msg}</span>}
+    </span>
   )
 }

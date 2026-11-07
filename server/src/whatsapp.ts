@@ -14,7 +14,6 @@ import makeWASocket, {
   isJidBroadcast,
   isJidGroup,
   isJidStatusBroadcast,
-  isLidUser,
   jidNormalizedUser,
   normalizeMessageContent,
   useMultiFileAuthState,
@@ -24,7 +23,8 @@ import makeWASocket, {
 import pino from 'pino'
 import QRCode from 'qrcode'
 import { DATA_DIR, all, get, run, tx } from './db.js'
-import { jidDigits, rememberLid, resolveContact, setMessageMedia, storeMessage, type MessageType } from './inbox.js'
+import { customerIds, jidKind } from './identity.js'
+import { jidDigits, pnForLid, rememberLid, resolveContact, setMessageMedia, storeMessage, type MessageType } from './inbox.js'
 import { broadcast } from './realtime.js'
 
 const logger = pino({ level: process.env.BATON_WA_LOG ?? 'warn' })
@@ -126,8 +126,8 @@ function saveContacts(contacts: ContactLike[]) {
     for (const c of contacts) {
       const ids = [c.id, c.lid, c.phoneNumber].filter((j): j is string => Boolean(j))
       if (ids.some((j) => isJidGroup(j) || isJidBroadcast(j) || j.endsWith('@newsletter'))) continue
-      const lid = jidDigits(ids.find((j) => isLidUser(j)))
-      const pn = jidDigits(ids.find((j) => j.endsWith('@s.whatsapp.net')))
+      const lid = jidDigits(ids.find((j) => jidKind(j) === 'lid'))
+      const pn = jidDigits(ids.find((j) => jidKind(j) === 'pn'))
       if (!lid && !pn) continue
       if (lid && pn) rememberLid(lid, pn)
       if (c.name) for (const key of [pn, lid]) if (key) run('INSERT OR REPLACE INTO phonebook (key, name) VALUES (?, ?)', key, c.name)
@@ -165,6 +165,34 @@ export async function syncContacts(numberId: number, sock = sockets.get(numberId
   const left = get<{ c: number }>('SELECT COUNT(*) AS c FROM contacts WHERE lid IS NOT NULL AND phone = lid')!.c
   return { resolved: unresolved.length - left, unresolved: left }
 }
+
+/** LIDs seen without a phone number, looked up together a few seconds later. */
+const toResolve = new Map<number, Set<string>>()
+let resolveTimer: NodeJS.Timeout | undefined
+
+function resolveSoon(numberId: number, lid: string) {
+  toResolve.set(numberId, (toResolve.get(numberId) ?? new Set()).add(lid))
+  clearTimeout(resolveTimer)
+  resolveTimer = setTimeout(() => {
+    for (const [id, lids] of toResolve) {
+      const sock = sockets.get(id)
+      toResolve.delete(id)
+      if (!sock) continue
+      sock.signalRepository.lidMapping.getPNsForLIDs([...lids].map((l) => `${l}@lid`))
+        .then((found) => {
+          let changed = false
+          tx(() => { for (const m of found ?? []) changed = rememberLid(jidDigits(m.lid)!, jidDigits(m.pn)!) || changed })
+          if (changed) contactsChanged()
+        })
+        .catch((err) => logger.warn({ err }, 'LID lookup failed'))
+    }
+  }, 5000)
+}
+
+/** Every 30 minutes, ask each linked phone again for the numbers behind unresolved LIDs. */
+setInterval(() => {
+  for (const [id, sock] of sockets) syncContacts(id, sock).catch((err) => logger.warn({ err }, 'periodic contact sync failed'))
+}, 30 * 60_000).unref()
 
 export async function disconnectNumber(numberId: number, logout: boolean) {
   const sock = sockets.get(numberId)
@@ -255,8 +283,10 @@ function ingest(numberId: number, sock: WASocket, msg: WAMessage, live: boolean)
 
   // WhatsApp may address a customer by LID, by phone number, or give both (remoteJidAlt).
   const alt = msg.key.remoteJidAlt
-  const lid = jidDigits(isLidUser(jid) ? jid : alt && isLidUser(alt) ? alt : undefined)
-  const pn = jidDigits(!isLidUser(jid) ? jid : alt && !isLidUser(alt) ? alt : undefined)
+  // A LID (including hosted "@hosted.lid") is never taken for a phone number.
+  const { lid, pn } = customerIds(jid, alt)
+  if (!lid && !pn) return
+  if (lid && !pn && !pnForLid(lid)) resolveSoon(numberId, lid)
   if (lid && pn) rememberLid(lid, pn)
   const fromMe = Boolean(msg.key.fromMe)
   const attribution = fromMe ? sentByTeammate.get(msg.key.id) : undefined

@@ -458,7 +458,7 @@ const NO_PHONE_SQL = `ct.phone = ct.lid OR (${SOCIAL_SQL}) IS NOT NULL`
 /** Display name: Baton edit, then phone contact list, then the customer's own WhatsApp/Instagram name, then number. */
 export const CONTACT_NAME_SQL =
   `COALESCE(ct.name, ct.saved_name, ct.wa_name, CASE WHEN ${NO_PHONE_SQL} THEN NULL ELSE ct.phone END,
-    (${SOCIAL_SQL}) || ' 用戶', '未知號碼')`
+    (${SOCIAL_SQL}) || ' 用戶', CASE WHEN ct.lid IS NOT NULL THEN '號碼未解析' ELSE '未知號碼' END)`
 /** The real phone number, or NULL while WhatsApp still hides it behind a LID (or for Instagram customers). */
 export const CONTACT_PHONE_SQL = `CASE WHEN ${NO_PHONE_SQL} THEN NULL ELSE ct.phone END`
 

@@ -14,6 +14,7 @@ import { setIo } from './realtime.js'
 import './autoreply.js'
 import { startAutomation } from './automation.js'
 import { seedCatalogue } from './brands.js'
+import { repairLidContacts } from './identity.js'
 import { startCampaignScheduler } from './campaigns.js'
 import './comments.js'
 import './transcribe.js'
@@ -92,6 +93,8 @@ server.listen(PORT, async () => {
   restoreAll().catch((err) => console.error('Failed to restore WhatsApp sessions', err))
   startPayrollScheduler()
   seedCatalogue()
+  const repaired = repairLidContacts()
+  if (repaired) console.log(`已修正 ${repaired} 位以 LID 儲存的客人（之前誤當電話號碼）`)
   startAutomation()
   startCampaignScheduler()
   startThreadsPolling()

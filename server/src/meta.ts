@@ -295,8 +295,12 @@ export function handleWebhook(payload: any) {
         for (const m of (value.messages ?? []) as CloudMessage[]) {
           const described = describeCloud(m)
           if (!described) continue
+          // Align by the webhook's wa_id (phone digits) and profile name.
+          const contacts = (value.contacts ?? []) as { wa_id?: string; profile?: { name?: string } }[]
+          const waId = String(contacts.find((c) => c.wa_id === m.from)?.wa_id ?? (contacts.length === 1 ? contacts[0].wa_id : m.from) ?? '').replace(/\D/g, '')
+          if (!waId) continue
           const stored = storeMessage({
-            numberId, jid: `${m.from}@s.whatsapp.net`, contact: { pn: m.from }, waName: names.get(m.from),
+            numberId, jid: `${waId}@s.whatsapp.net`, contact: { pn: waId }, waName: names.get(m.from) ?? contacts.find((c) => c.wa_id === waId)?.profile?.name,
             waId: m.id, fromMe: false, type: described.type, body: described.body, ts: Number(m.timestamp), live: true,
           })
           if (stored && described.mediaId) {
@@ -385,7 +389,8 @@ async function saveMedia(numberId: number, waId: string, url: string, token?: st
 /** Instagram and Messenger webhooks carry only an ID; look up the customer's name once. */
 async function fillName(channel: 'instagram' | 'messenger', numberId: number, id: string) {
   const contact = get<{ id: number; wa_name: string | null }>('SELECT id, wa_name FROM contacts WHERE phone = ?', `${channel === 'instagram' ? 'ig' : 'fb'}:${id}`)
-  if (!contact || contact.wa_name) return
+  // Look up once, and again if we only know the "@username" (e.g. from a comment).
+  if (!contact || (contact.wa_name && !contact.wa_name.startsWith('@'))) return
   const { accessToken } = numberConfig<{ accessToken: string }>(numberId)
   const profile = channel === 'instagram'
     ? await graph<{ name?: string; username?: string }>(`${IG}/${encodeURIComponent(id)}?fields=name,username`, accessToken)
