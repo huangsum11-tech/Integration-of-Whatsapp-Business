@@ -5,6 +5,7 @@
  *   whenever the knowledge base doesn't cover the question.
  */
 import { activePromotions } from './campaigns.js'
+import { brandById, brandOfConversation, brands, branchesOf, money, packagesFor, trialOffersFor, type Brand } from './brands.js'
 import { CONTACT_NAME_SQL, all, get, getSetting } from './db.js'
 import { AiUnavailableError, generate } from './llm.js'
 import { formatLocal, parseLocal } from './time.js'
@@ -14,34 +15,58 @@ export { AiUnavailableError }
 const CATEGORY_LABEL: Record<string, string> = { faq: '常見問題', policy: '公司政策', class: '課程資料', other: '其他資料' }
 
 /** Business profile and active knowledge entries, as stable text for the AI's context. */
-export function knowledgeContext(): string {
+/** This brand's own catalogue, from the knowledge base: the only prices the AI may quote. */
+function brandCatalogue(brand: Brand) {
+  const branches = branchesOf(brand.id)
+  const others = brands().filter((b) => b.id !== brand.id)
+  const trials = branches.map((br) => `${br.name}：${trialOffersFor(brand.id, br.key).map((o) => `${o.label} ${o.price_text}${o.validity ? `（${o.validity}）` : ''}`).join('；') || '（未有資料）'}`)
+  const packs = new Map<string, string[]>()
+  for (const p of packagesFor(brand.id)) packs.set(p.category, [...(packs.get(p.category) ?? []), `${p.sessions} 堂 ${money(p.price)}${p.validity ? `（${p.validity}）` : ''}`])
+  return [
+    `<brand name="${brand.name}" whatsapp="${brand.whatsapp}">`,
+    `分店：${branches.map((b) => `${b.name}（${b.address}）`).join('；')}`,
+    `新學員試堂（每位只限一次）：\n${trials.join('\n')}`,
+    `套票價目（原價）：\n${[...packs].map(([c, ps]) => `${c}：${ps.join('，')}`).join('\n')}`,
+    brand.after_trial_offer ? `試堂後優惠（原文）：${brand.after_trial_offer}` : '',
+    brand.booking_url ? `預約連結：${brand.booking_url}` : '預約連結：（未設定）',
+    others.length ? `其他品牌（不可報價，只可提供 WhatsApp）：${others.map((o) => `${o.name} ${o.whatsapp}（${branchesOf(o.id).map((b) => b.name).join('、')}）`).join('；')}` : '',
+    '</brand>',
+  ].filter(Boolean).join('\n')
+}
+
+export function knowledgeContext(brandId?: number | null): string {
   const name = getSetting('business_name')
   const intro = getSetting('business_intro')
   const trialUrl = getSetting('trial_booking_url')
   const bookingUrl = getSetting('booking_url')
+  // Entries for every brand, plus only this conversation's brand: never another brand's.
   const entries = all<{ category: string; title: string; body: string }>(
-    'SELECT category, title, body FROM knowledge WHERE active = 1 ORDER BY category, id',
+    'SELECT category, title, body FROM knowledge WHERE active = 1 AND (brand_id IS NULL OR brand_id = ?) ORDER BY category, id',
+    brandId ?? -1,
   )
+  const brand = brandById(brandId)
   return [
+    brand ? brandCatalogue(brand) : '',
     `<business name="${name || '（未設定）'}">\n${intro || '（未有介紹）'}\n</business>`,
     `<booking_links>\n首次試堂預約連結（只給第一次上堂的新客人）：${trialUrl || '（未設定）'}\n一般預約連結（已上過堂的學生）：${bookingUrl || '（未設定）'}\n</booking_links>`,
     entries.length
       ? `<knowledge>\n${entries.map((e) => `<entry type="${CATEGORY_LABEL[e.category] ?? e.category}" title="${e.title}">\n${e.body}\n</entry>`).join('\n')}\n</knowledge>`
       : '<knowledge>（知識庫暫時是空的）</knowledge>',
     ...activePromotions().map((p) => `<current_promotion name="${p.name}">\n${p.ai_note}\n</current_promotion>`),
-  ].join('\n\n')
+  ].filter(Boolean).join('\n\n')
 }
 
 /**
  * An FAQ answer whose keywords appear in the customer's message, so the reply is the
  * exact text the team wrote, with no AI call. The entry with the most matching keywords wins.
  */
-export function matchFaq(text: string): { id: number; title: string; body: string } | undefined {
+export function matchFaq(text: string, brandId?: number | null): { id: number; title: string; body: string } | undefined {
   const message = text.toLowerCase()
   let best: { id: number; title: string; body: string; hits: number } | undefined
   for (const faq of all<{ id: number; title: string; body: string; keywords: string }>(
     // Answers still containing a template [placeholder] are never sent word for word.
-    "SELECT id, title, body, keywords FROM knowledge WHERE active = 1 AND category = 'faq' AND keywords != '' AND instr(body, '[') = 0",
+    "SELECT id, title, body, keywords FROM knowledge WHERE active = 1 AND category = 'faq' AND keywords != '' AND instr(body, '[') = 0 AND (brand_id IS NULL OR brand_id = ?)",
+    brandId ?? -1,
   )) {
     const hits = faq.keywords.split(/[,，、]/).map((k) => k.trim().toLowerCase()).filter((k) => k && message.includes(k)).length
     if (hits && (!best || hits > best.hits)) best = { ...faq, hits }
@@ -114,7 +139,7 @@ export async function draftReply(conversationId: number, userId: number, instruc
 
   return generate({
     instructions: DRAFT_INSTRUCTIONS,
-    context: `${knowledgeContext()}\n\n<voice>\n${voice}\n</voice>`,
+    context: `${knowledgeContext(brandOfConversation(conversationId)?.id)}\n\n<voice>\n${voice}\n</voice>`,
     messages: [{ role: 'user', content: request }],
   })
 }
@@ -134,10 +159,16 @@ Booking:
   TRIAL: YYYY-MM-DD HH:MM | class name
   using the studio's local time and the "now" given with the conversation to resolve words like 聽日 or 星期六. Add it only when both the date and the time are clear, and only once per booking.
 
+Brands and money:
+- Quote only the prices in this conversation's <brand> block or knowledge base, exactly as written. Never quote another brand's prices; for another brand's branch, give that brand's WhatsApp number instead.
+- Never compute a discounted price (percentages, "95 折", bundles) that is not written out; say the final amount will be confirmed by the team, or the app.
+- Never tell a customer that a payment was received or checked, or that a package is active or added: only the team confirms that.
+
 Hand off to a human instead of replying when:
 - the answer needs a fact the knowledge base doesn't have,
 - the customer wants something done that you cannot do yourself (reschedule, cancel, pay, refund, change membership, send an invoice),
 - the customer complains, is upset, or asks for a person,
+- the customer asks about refunds, disputed class deductions, their own remaining classes or balance, or declares a health condition,
 - you are not sure.
 To hand off, output exactly one line: HANDOFF: <reason in Traditional Chinese, under 30 characters>
 Output nothing else in that case.
@@ -189,7 +220,7 @@ export async function customerReply(conversationId: number): Promise<CustomerRep
 
   return parseReply(await generate({
     instructions: CUSTOMER_INSTRUCTIONS,
-    context: knowledgeContext(),
+    context: knowledgeContext(brandOfConversation(conversationId)?.id),
     messages: [{ role: 'user', content: request }],
     maxTokens: 1500,
   }))

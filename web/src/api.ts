@@ -76,6 +76,8 @@ export interface Deal {
 export interface WaNumber {
   id: number; label: string; phone: string | null; status: string; demo: number
   conversations: number; qr: string | null; channel: Channel; reply_mode: ReplyMode
+  /** The brand whose prices, links and payment details this number uses. */
+  brand_id: number | null
   /** Official API IDs (never the access token). */
   ids: { phoneNumberId?: string; igUserId?: string; pageId?: string; userId?: string; username?: string; name?: string }
 }
@@ -83,7 +85,7 @@ export interface WaNumber {
 export type KnowledgeCategory = 'faq' | 'policy' | 'class' | 'other'
 
 export interface Knowledge {
-  id: number; category: KnowledgeCategory; title: string; body: string; keywords: string; active: number; updated_at: number
+  id: number; category: KnowledgeCategory; brand_id: number | null; title: string; body: string; keywords: string; active: number; updated_at: number
 }
 
 export interface AiSettings {

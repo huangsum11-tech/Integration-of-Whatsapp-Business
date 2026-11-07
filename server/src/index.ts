@@ -13,6 +13,7 @@ import { SESSION_COOKIE, userForToken } from './auth.js'
 import { setIo } from './realtime.js'
 import './autoreply.js'
 import { startAutomation } from './automation.js'
+import { seedCatalogue } from './brands.js'
 import { startCampaignScheduler } from './campaigns.js'
 import './comments.js'
 import './transcribe.js'
@@ -27,7 +28,7 @@ const PORT = Number(process.env.PORT ?? 4000)
 
 const app = express()
 // Keep the raw body: Meta webhook signatures are computed over the exact bytes.
-app.use(express.json({ limit: '1mb', verify: (req, _res, buf) => { (req as { rawBody?: Buffer }).rawBody = buf } }))
+app.use(express.json({ limit: '10mb', verify: (req, _res, buf) => { (req as { rawBody?: Buffer }).rawBody = buf } }))
 app.use(cookieParser())
 app.use('/webhooks', webhooks)
 app.use('/api', api)
@@ -90,6 +91,7 @@ server.listen(PORT, async () => {
   }
   restoreAll().catch((err) => console.error('Failed to restore WhatsApp sessions', err))
   startPayrollScheduler()
+  seedCatalogue()
   startAutomation()
   startCampaignScheduler()
   startThreadsPolling()

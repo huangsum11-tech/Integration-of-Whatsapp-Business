@@ -204,6 +204,131 @@ CREATE TABLE IF NOT EXISTS trials (
 );
 CREATE INDEX IF NOT EXISTS trials_due ON trials (status, followup_status, class_at);
 
+-- Brands: each has its own WhatsApp number(s), prices, booking link and payment details,
+-- which must never be mixed (e.g. Fuse Fitness vs Fuse Pilates).
+CREATE TABLE IF NOT EXISTS brands (
+  id INTEGER PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  whatsapp TEXT NOT NULL DEFAULT '',
+  -- Booking (to be provided): the brand's own booking link, the app's name, and the steps text/image.
+  booking_url TEXT NOT NULL DEFAULT '',
+  booking_platform TEXT NOT NULL DEFAULT '',
+  booking_steps TEXT NOT NULL DEFAULT '',
+  booking_steps_image TEXT,
+  -- Payment (to be provided): FPS ID, PayMe link, QR image. Read only for this brand's conversations.
+  fps_id TEXT NOT NULL DEFAULT '',
+  fps_name TEXT NOT NULL DEFAULT '',
+  payme_link TEXT NOT NULL DEFAULT '',
+  payment_qr_image TEXT,
+  ref_prefix TEXT NOT NULL DEFAULT '',
+  -- Text the AI may say after a trial (current offers), quoted from the knowledge base.
+  after_trial_offer TEXT NOT NULL DEFAULT '',
+  sort INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS branches (
+  id INTEGER PRIMARY KEY,
+  brand_id INTEGER NOT NULL REFERENCES brands(id),
+  key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  -- Other ways customers write the branch name, comma-separated (e.g. "SKW, shau kei wan").
+  aliases TEXT NOT NULL DEFAULT '',
+  address TEXT NOT NULL DEFAULT '',
+  sort INTEGER NOT NULL DEFAULT 0
+);
+-- First-trial offers (one per new customer), prices exactly as written in the knowledge base.
+CREATE TABLE IF NOT EXISTS trial_offers (
+  id INTEGER PRIMARY KEY,
+  brand_id INTEGER NOT NULL REFERENCES brands(id),
+  -- Comma-separated branch keys where it is offered.
+  branch_keys TEXT NOT NULL,
+  label TEXT NOT NULL,
+  price_text TEXT NOT NULL,
+  validity TEXT NOT NULL DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0
+);
+-- Packages customers can buy with FPS / PayMe, listed prices only (no computed discounts).
+CREATE TABLE IF NOT EXISTS packages (
+  id INTEGER PRIMARY KEY,
+  brand_id INTEGER NOT NULL REFERENCES brands(id),
+  category TEXT NOT NULL,
+  sessions INTEGER NOT NULL,
+  price INTEGER NOT NULL,
+  validity TEXT NOT NULL DEFAULT '',
+  -- Name as it appears in the booking system's back office, for adding the package.
+  backoffice_name TEXT NOT NULL DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0
+);
+
+-- A guided conversation in progress: the new-customer trial flow or a package purchase.
+CREATE TABLE IF NOT EXISTS flows (
+  id INTEGER PRIMARY KEY,
+  conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+  kind TEXT NOT NULL CHECK (kind IN ('trial','purchase')),
+  brand_id INTEGER REFERENCES brands(id),
+  step TEXT NOT NULL,
+  data TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','done','handoff','aborted','abandoned')),
+  nudged INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS flows_active ON flows (conversation_id, status);
+
+-- FPS / PayMe payment requests. Baton tracks them; the money goes straight to the studio.
+CREATE TABLE IF NOT EXISTS payment_requests (
+  id INTEGER PRIMARY KEY,
+  ref TEXT NOT NULL UNIQUE,
+  conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+  contact_id INTEGER NOT NULL REFERENCES contacts(id),
+  brand_id INTEGER NOT NULL REFERENCES brands(id),
+  package_id INTEGER REFERENCES packages(id),
+  package_label TEXT NOT NULL,
+  listed_price INTEGER,
+  amount INTEGER,
+  -- pending_quote: a discount applies and a teammate must quote the amount.
+  status TEXT NOT NULL CHECK (status IN (
+    'pending_quote','quoted','awaiting_payment','awaiting_verification','verified','credited','notified',
+    'amount_mismatch','unclear','not_found','overdue','cancelled')),
+  discount_note TEXT NOT NULL DEFAULT '',
+  screenshot_message_id INTEGER REFERENCES messages(id),
+  verified_by INTEGER REFERENCES users(id),
+  verified_at INTEGER,
+  credited_by INTEGER REFERENCES users(id),
+  credited_at INTEGER,
+  notified_at INTEGER,
+  return_reason TEXT,
+  reminded_at INTEGER,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS payment_requests_status ON payment_requests (status, updated_at);
+CREATE TABLE IF NOT EXISTS payment_events (
+  id INTEGER PRIMARY KEY,
+  request_id INTEGER NOT NULL REFERENCES payment_requests(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id),
+  from_status TEXT,
+  to_status TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  ts INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
+-- Back-office automation runs (Vibefam assist mode): one row per run, with every step.
+CREATE TABLE IF NOT EXISTS automation_runs (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL,
+  request_id INTEGER REFERENCES payment_requests(id),
+  user_id INTEGER REFERENCES users(id),
+  status TEXT NOT NULL CHECK (status IN ('running','awaiting_confirmation','stopped','failed','done')),
+  target TEXT NOT NULL DEFAULT '',
+  detail TEXT NOT NULL DEFAULT '',
+  log TEXT NOT NULL DEFAULT '[]',
+  started_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  ended_at INTEGER
+);
+
 -- Staff shortcuts: typing "/價錢" in the composer inserts the saved text.
 CREATE TABLE IF NOT EXISTS quick_replies (
   id INTEGER PRIMARY KEY,
@@ -305,6 +430,16 @@ CREATE TABLE IF NOT EXISTS payroll_items (
   sent_at INTEGER
 );
 `)
+
+// Which brand a WhatsApp number / account belongs to: decides prices, links and payment details.
+if (!columns('numbers').includes('brand_id')) db.exec('ALTER TABLE numbers ADD COLUMN brand_id INTEGER REFERENCES brands(id)')
+// Knowledge entries for one brand only (NULL = every brand).
+if (!columns('knowledge').includes('brand_id')) db.exec('ALTER TABLE knowledge ADD COLUMN brand_id INTEGER REFERENCES brands(id)')
+// Trial details from the guided flow, and the two reminders before class.
+for (const [col, def] of [
+  ['brand_id', 'INTEGER REFERENCES brands(id)'], ['branch_key', "TEXT NOT NULL DEFAULT ''"],
+  ['reminder_day_status', "TEXT NOT NULL DEFAULT 'pending'"], ['reminder_2h_status', "TEXT NOT NULL DEFAULT 'pending'"],
+] as const) if (!columns('trials').includes(col)) db.exec(`ALTER TABLE trials ADD COLUMN ${col} ${def}`)
 
 export function getSetting(key: string, fallback = ''): string {
   return get<{ value: string }>('SELECT value FROM settings WHERE key = ?', key)?.value ?? fallback

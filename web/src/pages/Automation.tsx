@@ -9,6 +9,7 @@ interface Settings {
   notify_number_id: number | null
   followup_enabled: boolean; followup_minutes: number; followup_message: string
   followup_wa_template_name: string; followup_wa_template_language: string
+  reminder_enabled: boolean; reminder_wa_template_name: string; reminder_wa_template_language: string
   alert_enabled: boolean; alert_minutes: number; alert_phone: string; alert_from_hour: number; alert_to_hour: number
 }
 interface Report { report_enabled: boolean; report_phones: string; report_weekday: number; report_hour: number }
@@ -119,6 +120,14 @@ function SettingsCard({ data, isAdmin, onSaved }: { data: Overview; isAdmin: boo
       <section className="card ai-card">
         <div className="ai-card-head"><h2><Icon name="sparkle" size={18} />試堂跟進</h2></div>
         <fieldset className="form-stack" disabled={!isAdmin}>
+          <label className="toggle-row">
+            <input type="checkbox" checked={form.reminder_enabled} onChange={(e) => set('reminder_enabled', e.target.checked)} />
+            試堂前提醒：前一天及開堂前 2 小時各一次
+          </label>
+          <div className="col-pick">
+            <div><label className="label">提醒用 Cloud API 模板（24 小時外；變數 {'{{1}}'} 名稱、{'{{2}}'} 時間）</label><input className="input" value={form.reminder_wa_template_name} onChange={(e) => set('reminder_wa_template_name', e.target.value.trim())} /></div>
+            <div><label className="label">語言代碼</label><input className="input" value={form.reminder_wa_template_language} onChange={(e) => set('reminder_wa_template_language', e.target.value.trim())} /></div>
+          </div>
           <label className="toggle-row">
             <input type="checkbox" checked={form.followup_enabled} onChange={(e) => set('followup_enabled', e.target.checked)} />
             上完試堂後自動發跟進訊息

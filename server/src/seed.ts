@@ -6,6 +6,7 @@
 import './env.js'
 import { hashPassword } from './auth.js'
 import { get, run, setSetting, tx } from './db.js'
+import { seedCatalogue } from './brands.js'
 import { addEvent, storeMessage } from './inbox.js'
 
 if (get<{ c: number }>('SELECT COUNT(*) AS c FROM users')?.c) {
@@ -142,5 +143,10 @@ tx(() => {
   run(`INSERT INTO campaigns (name, number_id, audience, message, status, scheduled_at, created_by)
        VALUES ('12 月 Reformer 套票優惠', ?, '{"segment":"all","tags":[]}', '{名稱} 你好！', 'scheduled', ?, ?)`, sales, now + 5 * hour, karen)
 })
+
+// Demo numbers: 銷售熱線 as Fuse Fitness, 客戶服務 as Fuse Pilates.
+seedCatalogue()
+run("UPDATE numbers SET brand_id = (SELECT id FROM brands WHERE key = 'fitness') WHERE label = '銷售熱線'")
+run("UPDATE numbers SET brand_id = (SELECT id FROM brands WHERE key = 'pilates') WHERE label = '客戶服務'")
 
 console.log('Demo data created. Log in with karen@baton.demo / baton-demo')

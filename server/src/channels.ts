@@ -1,9 +1,11 @@
 /** Sending a reply, whichever way the number is connected. */
 import { get, run } from './db.js'
 import { getConversation, storeMessage } from './inbox.js'
-import { sendCloudTemplate, sendCloudText, sendInstagramText, sendMessengerText, type TemplateMessage } from './meta.js'
+import fs from 'node:fs'
+import path from 'node:path'
+import { sendCloudImage, sendCloudTemplate, sendCloudText, sendInstagramText, sendMessengerText, type TemplateMessage } from './meta.js'
 import { sendThreadsReply } from './threads.js'
-import { isConnected, sendText } from './whatsapp.js'
+import { MEDIA_DIR, isConnected, sendImageFile, sendText } from './whatsapp.js'
 
 export type Channel = 'wa_web' | 'wa_cloud' | 'instagram' | 'messenger' | 'threads'
 
@@ -95,5 +97,31 @@ export async function sendToPhone(numberId: number, phone: string, text: string,
     return waId
   } else {
     throw new Error('Instagram／Facebook／Threads 不能主動發訊息給電話號碼，請選 WhatsApp 號碼')
+  }
+}
+
+/**
+ * Send an image kept under the media folder (e.g. "uploads/brand-1-qr.png"). WhatsApp only;
+ * Instagram, Messenger and Threads need a public link, so callers fall back to text there.
+ */
+export async function sendImage(conversationId: number, relPath: string, caption: string, opts: SendOptions) {
+  const conversation = getConversation(conversationId)
+  if (!conversation) throw new Error('找不到對話')
+  const file = path.join(MEDIA_DIR, relPath)
+  if (!fs.existsSync(file)) throw new Error('圖片檔案不存在')
+  const number = get<{ demo: number; channel: Channel }>('SELECT demo, channel FROM numbers WHERE id = ?', conversation.number_id)!
+  const message = {
+    numberId: conversation.number_id, jid: conversation.jid, contact: contactFor(conversation.jid, conversation.phone),
+    fromMe: true, senderId: opts.userId, aiAssisted: false, aiAuto: opts.aiAuto ?? false, type: 'image' as const,
+    body: caption, mediaPath: relPath, mediaMime: `image/${path.extname(file).slice(1)}`, ts: Math.floor(Date.now() / 1000), live: true,
+  }
+  if (number.demo) {
+    storeMessage({ ...message, waId: `demo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })
+  } else if (number.channel === 'wa_web') {
+    await sendImageFile(conversation.number_id, conversation.jid, file, caption, opts.userId, message.aiAuto)
+  } else if (number.channel === 'wa_cloud') {
+    storeMessage({ ...message, waId: await sendCloudImage(conversation.number_id, conversationId, conversation.jid, file, caption) })
+  } else {
+    throw new Error('這個渠道暫時不支援傳送圖片')
   }
 }

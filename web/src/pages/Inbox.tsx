@@ -511,6 +511,7 @@ function SidePanel({ detail, reload }: { detail: Detail; reload: () => void }) {
           onBlur={() => notes !== contact.notes && saveContact({ notes })} placeholder="喜好、地址、注意事項…全公司共用" />
       </div>
 
+      <StudioSection conversationId={conversation.id} />
       <ReviewButton conversationId={conversation.id} />
       <TagSection detail={detail} reload={reload} />
       <TrialSection detail={detail} reload={reload} />
@@ -645,6 +646,80 @@ function ReviewButton({ conversationId }: { conversationId: number }) {
     <div className="side-section" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
       <button className="btn sm" onClick={send}><Icon name="trophy" size={14} />邀請 Google 評價</button>
       {msg && <span className="muted" style={{ fontSize: 12 }}>{msg}</span>}
+    </div>
+  )
+}
+
+interface StudioInfo {
+  flow: { kind: 'trial' | 'purchase'; step: string; brand: string | null; data: Record<string, any> } | null
+  brand: string | null
+  packages: { id: number; category: string; sessions: number; price: number }[]
+  payments: { id: number; ref: string; status: string; package_label: string; amount: number | null }[]
+}
+const STEP_LABEL: Record<string, string> = {
+  branch: '揀分店', offer: '揀試堂', info: '收集資料', booking: '等客人預約', category: '揀套票類別', package: '揀堂數',
+  confirm: '等客人確認', awaiting_quote: '等同事報價', paying: '等付款',
+}
+const PAY_LABEL: Record<string, string> = {
+  pending_quote: '待報價', quoted: '已報價', awaiting_payment: '待付款', awaiting_verification: '待核實', verified: '已核實',
+  credited: '已入帳', notified: '已通知', amount_mismatch: '金額不符', unclear: '截圖不清', not_found: '找不到入帳', overdue: '逾時未付', cancelled: '已取消',
+}
+
+/** The guided flow in progress, this customer's FPS / PayMe requests, and starting a new one. */
+function StudioSection({ conversationId }: { conversationId: number }) {
+  const [info, setInfo] = useState<StudioInfo | null>(null)
+  const [pkgId, setPkgId] = useState('')
+  const [amount, setAmount] = useState('')
+  const [error, setError] = useState('')
+  const load = useCallback(() => { api<StudioInfo>(`/conversations/${conversationId}/studio`).then(setInfo).catch(() => setInfo(null)) }, [conversationId])
+  useEffect(() => {
+    load()
+    const socket = getSocket()
+    socket.on('payment', load)
+    socket.on('event', load)
+    return () => { socket.off('payment', load); socket.off('event', load) }
+  }, [load])
+  if (!info) return null
+  const pkg = info.packages.find((p) => String(p.id) === pkgId)
+  const create = async () => {
+    if (!pkg) return
+    const value = amount ? Number(amount) : pkg.price
+    if (!confirm(`向客人發出 ${pkg.category} ${pkg.sessions} 堂 $${value.toLocaleString('en-US')} 的收款資料？`)) return
+    setError('')
+    try { await api(`/conversations/${conversationId}/payments`, { body: { package_id: pkg.id, amount: amount ? value : undefined } }); setPkgId(''); setAmount(''); load() }
+    catch (err) { setError(err instanceof Error ? err.message : '未能建立') }
+  }
+  return (
+    <div className="side-section">
+      <h3>流程及付款{info.brand ? `（${info.brand}）` : ''}</h3>
+      {info.flow ? (
+        <div className="deal" style={{ alignItems: 'flex-start' }}>
+          <div className="title">
+            <div>{info.flow.kind === 'trial' ? '試堂引導' : 'FPS／PayMe 購買'}：{STEP_LABEL[info.flow.step] ?? info.flow.step}</div>
+            {info.flow.data.preference && <div className="faint" style={{ fontSize: 12 }}>客人：{info.flow.data.preference}</div>}
+          </div>
+          <button className="btn sm" title="結束流程，由同事接手" aria-label="結束流程" onClick={() => api(`/conversations/${conversationId}/flow/end`, { body: {} }).then(load)}><Icon name="x" size={13} /></button>
+        </div>
+      ) : <div className="faint" style={{ fontSize: 13 }}>沒有進行中的流程</div>}
+      {info.payments.map((p) => (
+        <a key={p.id} className="deal" href="#/payments" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div className="title"><div className="num">{p.ref} {p.package_label}</div><div className="faint" style={{ fontSize: 12 }}>{p.amount != null ? `$${p.amount.toLocaleString('en-US')}` : '待報價'}</div></div>
+          <span className={`chip ${p.status === 'awaiting_verification' ? 'coral' : p.status === 'notified' ? 'pine' : ''}`}>{PAY_LABEL[p.status] ?? p.status}</span>
+        </a>
+      ))}
+      {info.packages.length > 0 && (
+        <div className="inline-form" style={{ flexWrap: 'wrap' }}>
+          <select className="select" value={pkgId} onChange={(e) => setPkgId(e.target.value)} aria-label="套票" style={{ flex: '1 1 100%' }}>
+            <option value="">建立付款請求：選擇套票</option>
+            {info.packages.map((p) => <option key={p.id} value={p.id}>{p.category} {p.sessions} 堂 ${p.price.toLocaleString('en-US')}</option>)}
+          </select>
+          {pkg && <>
+            <input className="input" inputMode="numeric" placeholder={`金額（預設 $${pkg.price}）`} value={amount} onChange={(e) => setAmount(e.target.value.replace(/\D/g, ''))} style={{ flex: 1, minWidth: 0 }} aria-label="金額" />
+            <button className="btn sm primary" onClick={create}>發出收款資料</button>
+          </>}
+        </div>
+      )}
+      {error && <div className="error" style={{ fontSize: 12 }}>{error}</div>}
     </div>
   )
 }

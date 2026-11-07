@@ -27,6 +27,7 @@ import {
 import { handleWebhook, subscribeWebhooks, validSignature, verifyCloud, verifyInstagram, verifyMessenger } from './meta.js'
 import { verifyThreads } from './threads.js'
 import { setupStatus } from './setup.js'
+import { studio } from './routes-studio.js'
 import { homeData } from './home.js'
 import { broadcast } from './realtime.js'
 import { MEDIA_DIR, connectNumber, currentQr, disconnectNumber, isConnected, syncContacts } from './whatsapp.js'
@@ -454,6 +455,7 @@ api.post('/ai/test', async (req, res) => {
 
 const knowledgeEntry = z.object({
   category: z.enum(['faq', 'policy', 'class', 'other']),
+  brand_id: z.number().int().nullable().default(null),
   title: z.string().min(1).max(200),
   body: z.string().min(1).max(8000),
   keywords: z.string().max(500).default(''),
@@ -485,16 +487,16 @@ api.post('/knowledge/import', requireAdmin, (req, res) => {
 
 api.post('/knowledge', requireAdmin, (req, res) => {
   const b = body(knowledgeEntry, req)
-  const id = run('INSERT INTO knowledge (category, title, body, keywords, active) VALUES (?, ?, ?, ?, ?)',
-    b.category, b.title, b.body, b.keywords, b.active ? 1 : 0).lastInsertRowid
+  const id = run('INSERT INTO knowledge (category, title, body, keywords, active, brand_id) VALUES (?, ?, ?, ?, ?, ?)',
+    b.category, b.title, b.body, b.keywords, b.active ? 1 : 0, b.brand_id).lastInsertRowid
   res.json(get('SELECT * FROM knowledge WHERE id = ?', Number(id)))
 })
 
 api.put('/knowledge/:id', requireAdmin, (req, res) => {
   const id = Number(req.params.id)
   const b = body(knowledgeEntry, req)
-  run('UPDATE knowledge SET category = ?, title = ?, body = ?, keywords = ?, active = ?, updated_at = unixepoch() WHERE id = ?',
-    b.category, b.title, b.body, b.keywords, b.active ? 1 : 0, id)
+  run('UPDATE knowledge SET category = ?, title = ?, body = ?, keywords = ?, active = ?, brand_id = ?, updated_at = unixepoch() WHERE id = ?',
+    b.category, b.title, b.body, b.keywords, b.active ? 1 : 0, b.brand_id, id)
   res.json(get('SELECT * FROM knowledge WHERE id = ?', id))
 })
 
@@ -557,6 +559,9 @@ api.put('/automation/settings', requireAdmin, (req, res) => {
     alert_phone: z.string().max(30).optional(),
     alert_from_hour: z.number().int().min(0).max(23).optional(),
     alert_to_hour: z.number().int().min(1).max(24).optional(),
+    reminder_enabled: z.boolean().optional(),
+    reminder_wa_template_name: z.string().max(200).optional(),
+    reminder_wa_template_language: z.string().max(20).optional(),
   }), req)
   saveAutomationSettings(b)
   res.json(automationSettings())
@@ -995,6 +1000,8 @@ api.get('/analytics', (req, res) => {
   const days = Math.min(Math.max(Number(req.query.days ?? 30), 1), 365)
   res.json(teamAnalytics(days))
 })
+
+api.use(studio)
 
 // ---------- Meta webhook (WhatsApp Cloud API & Instagram) ----------
 

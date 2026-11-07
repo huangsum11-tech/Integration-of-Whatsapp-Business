@@ -203,6 +203,17 @@ export async function sendText(
   return sent.key.id
 }
 
+/** Send an image file (e.g. a payment QR code) with an optional caption. */
+export async function sendImageFile(numberId: number, jid: string, file: string, caption: string, userId: number | null, aiAuto = false) {
+  const sock = sockets.get(numberId)
+  if (!sock) throw new Error('此號碼未連接')
+  const sent = await sock.sendMessage(jid, { image: fs.readFileSync(file), caption })
+  if (!sent?.key.id) throw new Error('發送失敗')
+  sentByTeammate.set(sent.key.id, { userId, aiAssisted: false, aiAuto })
+  ingest(numberId, sock, sent, true)
+  return sent.key.id
+}
+
 const MEDIA_TYPES: Partial<Record<string, MessageType>> = {
   imageMessage: 'image', videoMessage: 'video', audioMessage: 'audio',
   documentMessage: 'document', documentWithCaptionMessage: 'document', stickerMessage: 'sticker',

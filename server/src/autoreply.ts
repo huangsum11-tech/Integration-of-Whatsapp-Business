@@ -12,6 +12,9 @@ import { all, get, getSetting, run } from './db.js'
 import { addEvent, getConversation, inboxEvents, previewOf, type MessageType } from './inbox.js'
 import { broadcast } from './realtime.js'
 import { canTranscribe } from './transcribe.js'
+import { handleFlows, type FlowReply } from './flows.js'
+import { brandOfConversation } from './brands.js'
+import { sendImage } from './channels.js'
 
 export type ReplyMode = 'off' | 'suggest' | 'auto'
 
@@ -83,19 +86,23 @@ async function respond(conversationId: number) {
   }
   const latestId = pending[0].id
 
-  let reply: CustomerReply
+  let reply: FlowReply
+  // Guided trial / purchase flows (and sensitive topics) come before FAQs and the AI.
+  const flowReply = handleFlows(conversationId, pending)
   const nonText = pending.find((m) => m.type !== 'text' && !m.transcript)
   const recentAuto = get<{ c: number }>(
     'SELECT COUNT(*) AS c FROM messages WHERE conversation_id = ? AND ai_auto = 1 AND ts > unixepoch() - 3600', conversationId,
   )!.c
-  if (nonText) {
+  if (flowReply) {
+    reply = flowReply
+  } else if (nonText) {
     // The AI reads text only; photos, voice notes and files need a person.
     reply = { action: 'handoff', reason: `客人傳送了${previewOf(nonText.type, '').trim() || '非文字訊息'}` }
   } else if (recentAuto >= MAX_AUTO_PER_HOUR) {
     reply = { action: 'handoff', reason: '一小時內自動回覆次數已達上限' }
   } else {
     // An exact FAQ answer only fits when it's what the latest message asks; anything else goes to the AI.
-    const faq = matchFaq(pending[0].transcript ?? pending[0].body)
+    const faq = matchFaq(pending[0].transcript ?? pending[0].body, brandOfConversation(conversationId)?.id)
     reply = faq ? { action: 'reply', text: faq.body } : await customerReply(conversationId)
   }
 
@@ -112,11 +119,19 @@ async function respond(conversationId: number) {
     if (reply.action === 'handoff') addEvent(conversationId, null, 'ai_handoff', reply.reason)
   } else if (reply.action === 'reply') {
     await sendReply(conversationId, reply.text, { userId: null, aiAuto: true })
+    for (const image of reply.images ?? []) {
+      await sendImage(conversationId, image, '', { userId: null, aiAuto: true }).catch((err) => console.warn('Image not sent', err))
+    }
   } else {
     run('UPDATE conversations SET ai_paused = 1, needs_human = 1 WHERE id = ?', conversationId)
     addEvent(conversationId, null, 'ai_handoff', reply.reason)
     const holding = getSetting('handoff_message').trim()
     if (holding) await sendReply(conversationId, holding, { userId: null, aiAuto: true })
+  }
+  // Replied, but a teammate still has something to do (quote a discount, check a screenshot…).
+  if (reply.action === 'reply' && reply.flagForTeam) {
+    run('UPDATE conversations SET needs_human = 1 WHERE id = ?', conversationId)
+    addEvent(conversationId, null, 'ai_handoff', reply.flagForTeam)
   }
   // The customer told the AI when their trial class is: remember it for the follow-up.
   if (reply.action === 'reply' && reply.trial) recordTrial(conversationId, reply.trial.at, reply.trial.className, 'ai', null)

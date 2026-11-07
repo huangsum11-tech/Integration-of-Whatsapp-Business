@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { BrandSelect } from './BrandSelect'
 import { api, type Channel, type ReplyMode, type WaNumber } from '../api'
 import { useApp } from '../App'
 import { Icon, Modal, NumberStatus, type IconName } from '../components'
@@ -83,6 +84,11 @@ export default function Numbers() {
               <div className="faint" style={{ fontSize: 12 }}>{n.demo ? '示範號碼' : channel.title}</div>
               <div className="stats">
                 <div><b>{n.conversations}</b>對話</div>
+              </div>
+              <div>
+                <label className="label" htmlFor={`brand-${n.id}`}>品牌（決定價目、預約連結及收款資料）</label>
+                <BrandSelect id={`brand-${n.id}`} value={n.brand_id} disabled={!isAdmin} emptyLabel="未設定（不會報價或發收款資料）"
+                  onChange={(brand_id) => api(`/numbers/${n.id}/brand`, { method: 'PUT', body: { brand_id } }).then(refreshNumbers)} />
               </div>
               <div>
                 <div className="label">AI 回覆方式</div>

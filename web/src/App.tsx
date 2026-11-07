@@ -5,6 +5,7 @@ import { closeSocket, getSocket } from './socket'
 import Customers from './pages/Customers'
 import Inbox from './pages/Inbox'
 import Marketing from './pages/Marketing'
+import Payments from './pages/Payments'
 import Payroll from './pages/Payroll'
 import Settings from './pages/Settings'
 import Today from './pages/Today'
@@ -26,6 +27,7 @@ const ROUTES: { path: string; label: string; icon: IconName; admin?: boolean }[]
   { path: 'today', label: '今日', icon: 'sun' },
   { path: 'inbox', label: '收件匣', icon: 'inbox' },
   { path: 'customers', label: '客人', icon: 'contacts' },
+  { path: 'payments', label: '付款', icon: 'card' },
   { path: 'marketing', label: '推廣', icon: 'megaphone', admin: true },
   { path: 'instructors', label: '導師', icon: 'wallet', admin: true },
   { path: 'settings', label: '設定', icon: 'gear' },
@@ -78,6 +80,7 @@ function Shell({ me, setMe, onLogout }: { me: User; setMe: (u: User) => void; on
   const [users, setUsers] = useState<User[]>([])
   const [numbers, setNumbers] = useState<WaNumber[]>([])
   const [unread, setUnread] = useState(0)
+  const [toCheck, setToCheck] = useState(0)
   const route = useRoute()
   const routes = ROUTES.filter((r) => !r.admin || me.role === 'admin')
   const page = routes.some((r) => r.path === route[0]) ? route[0] : 'today'
@@ -87,6 +90,7 @@ function Shell({ me, setMe, onLogout }: { me: User; setMe: (u: User) => void; on
   const refreshNumbers = useCallback(() => { api<WaNumber[]>('/numbers').then(setNumbers) }, [])
   const refreshUnread = useCallback(() => {
     api<{ id: number; unread: number }[]>('/conversations?view=all').then((cs) => setUnread(cs.filter((c) => c.unread > 0).length))
+    api<{ counts: { verify: number | null; quote: number | null } }>('/payments?status=awaiting_verification').then((p) => setToCheck((p.counts.verify ?? 0) + (p.counts.quote ?? 0))).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -96,8 +100,9 @@ function Shell({ me, setMe, onLogout }: { me: User; setMe: (u: User) => void; on
       setNumbers((prev) => prev.some((p) => p.id === n.id) ? prev.map((p) => (p.id === n.id ? { ...p, ...n } : p)) : (refreshNumbers(), prev))
     socket.on('number', onNumber)
     socket.on('conversation', refreshUnread)
+    socket.on('payment', refreshUnread)
     socket.on('refresh', refreshUsers)
-    return () => { socket.off('number', onNumber); socket.off('conversation', refreshUnread); socket.off('refresh', refreshUsers) }
+    return () => { socket.off('number', onNumber); socket.off('conversation', refreshUnread); socket.off('payment', refreshUnread); socket.off('refresh', refreshUsers) }
   }, [refreshUsers, refreshNumbers, refreshUnread])
 
   const logout = async () => { await api('/logout', { method: 'POST' }); onLogout() }
@@ -112,6 +117,7 @@ function Shell({ me, setMe, onLogout }: { me: User; setMe: (u: User) => void; on
               <Icon name={r.icon} size={21} />
               {r.label}
               {r.path === 'inbox' && unread > 0 && <span className="dot">{unread}</span>}
+              {r.path === 'payments' && toCheck > 0 && <span className="dot" aria-label={`${toCheck} 筆待處理`}>{toCheck}</span>}
             </a>
           ))}
           <div className="spacer" />
@@ -134,6 +140,7 @@ function Shell({ me, setMe, onLogout }: { me: User; setMe: (u: User) => void; on
           {page === 'inbox' && <Inbox conversationId={route[1] ? Number(route[1]) : null} />}
           {page === 'customers' && <Customers tab={route[1]} />}
           {page === 'marketing' && <Marketing />}
+          {page === 'payments' && <Payments />}
           {page === 'instructors' && <Payroll />}
           {page === 'settings' && <Settings section={route[1]} />}
         </main>

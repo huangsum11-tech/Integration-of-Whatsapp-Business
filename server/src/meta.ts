@@ -103,6 +103,29 @@ export async function sendCloudText(numberId: number, conversationId: number, ji
   return id
 }
 
+/** Upload an image to WhatsApp and send it (within the 24-hour window). */
+export async function sendCloudImage(numberId: number, conversationId: number, jid: string, file: string, caption: string) {
+  assertServiceWindow(conversationId)
+  const config = numberConfig<CloudConfig>(numberId)
+  const form = new FormData()
+  const ext = path.extname(file).slice(1).toLowerCase()
+  form.append('messaging_product', 'whatsapp')
+  form.append('type', `image/${ext === 'jpg' ? 'jpeg' : ext}`)
+  form.append('file', new Blob([fs.readFileSync(file)], { type: `image/${ext === 'jpg' ? 'jpeg' : ext}` }), path.basename(file))
+  const res = await fetch(`${FB}/${encodeURIComponent(config.phoneNumberId)}/media`, {
+    method: 'POST', headers: { authorization: `Bearer ${config.accessToken}` }, body: form,
+  })
+  const media = await res.json().catch(() => ({})) as { id?: string; error?: { message?: string } }
+  if (!res.ok || !media.id) throw new Error(`Meta API 錯誤：${media.error?.message ?? res.status}`)
+  const data = await graph<{ messages?: { id: string }[] }>(`${FB}/${encodeURIComponent(config.phoneNumberId)}/messages`, config.accessToken, {
+    method: 'POST',
+    body: { messaging_product: 'whatsapp', recipient_type: 'individual', to: jid.split('@')[0], type: 'image', image: { id: media.id, caption } },
+  })
+  const id = data.messages?.[0]?.id
+  if (!id) throw new Error('發送失敗')
+  return id
+}
+
 export async function sendMessengerText(numberId: number, conversationId: number, jid: string, text: string) {
   assertServiceWindow(conversationId)
   const config = numberConfig<MessengerConfig>(numberId)

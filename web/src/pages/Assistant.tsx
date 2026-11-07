@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, type AiSettings, type Knowledge, type KnowledgeCategory } from '../api'
 import { useApp } from '../App'
 import { Icon, Modal } from '../components'
+import { BrandSelect } from './BrandSelect'
 
 const CATEGORIES: { id: KnowledgeCategory; label: string; hint: string }[] = [
   { id: 'faq', label: '常見問題', hint: '設定關鍵字後，客人問到就直接用這段答案回覆，不經 AI' },
@@ -60,7 +61,7 @@ export default function Assistant() {
             <div className="ai-card-head">
               <h2><Icon name="book" size={18} />知識庫</h2>
               {isAdmin && (
-                <button className="btn sm primary" onClick={() => setEditing({ category: filter === 'all' ? 'policy' : filter, title: '', body: '', keywords: '', active: true })}>
+                <button className="btn sm primary" onClick={() => setEditing({ category: filter === 'all' ? 'policy' : filter, brand_id: null, title: '', body: '', keywords: '', active: true })}>
                   <Icon name="plus" size={14} />新增
                 </button>
               )}
@@ -276,7 +277,7 @@ function KnowledgeModal({ draft, onClose, onSaved }: { draft: Draft; onClose: ()
   const save = async () => {
     setError('')
     try {
-      const body = { category: form.category, title: form.title, body: form.body, keywords: form.category === 'faq' ? form.keywords : '', active: form.active }
+      const body = { category: form.category, brand_id: form.brand_id ?? null, title: form.title, body: form.body, keywords: form.category === 'faq' ? form.keywords : '', active: form.active }
       if (form.id) await api(`/knowledge/${form.id}`, { method: 'PUT', body })
       else await api('/knowledge', { body })
       onSaved()
@@ -291,6 +292,10 @@ function KnowledgeModal({ draft, onClose, onSaved }: { draft: Draft; onClose: ()
   }
   return (
     <Modal title={form.id ? '編輯資料' : '新增資料'} onClose={onClose}>
+      <div>
+        <label className="label" htmlFor="kb-brand">適用品牌</label>
+        <BrandSelect id="kb-brand" value={form.brand_id ?? null} emptyLabel="所有品牌" onChange={(brand_id) => setForm({ ...form, brand_id })} />
+      </div>
       <div>
         <label className="label" htmlFor="kb-cat">分類</label>
         <select id="kb-cat" className="select" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value as KnowledgeCategory })}>
