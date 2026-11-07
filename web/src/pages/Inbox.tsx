@@ -409,10 +409,13 @@ function EventLine({ e }: { e: InboxEvent }) {
     ai_error: 'AI 回覆失敗',
     trial: e.user_id ? `${who} 記錄了試堂` : 'AI 記錄了試堂',
     review: `${who} 發送了 Google 評價邀請`,
+    payment: '付款',
+    flow_start: '開始引導流程',
+    flow_end: '引導流程結束',
   }
   return (
     <div className={`event ${e.kind === 'handoff' || e.kind === 'offboard' || e.kind === 'ai_handoff' || e.kind === 'ai_error' ? 'handoff' : ''}`}>
-      <Icon name={e.kind.startsWith('deal') ? 'trophy' : e.kind === 'close' ? 'check' : e.kind.startsWith('ai_') ? 'sparkle' : 'handoff'} size={13} />
+      <Icon name={e.kind.startsWith('deal') ? 'trophy' : e.kind === 'close' ? 'check' : e.kind.startsWith('ai_') ? 'sparkle' : e.kind === 'payment' ? 'card' : 'handoff'} size={13} />
       <span>{text[e.kind] ?? e.kind}{e.body && !e.kind.startsWith('deal') ? `：「${e.body}」` : ''} · {clock(e.ts)}</span>
     </div>
   )
