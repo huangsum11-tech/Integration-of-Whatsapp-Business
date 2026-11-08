@@ -172,23 +172,25 @@ npm run dev    # 前端 http://localhost:5173
 
 ## 截圖
 
-| 登入 | 分析 |
+| 今日（需要處理、時間表、渠道狀態） | 收件匣（交接、內部備註、AI 草擬） |
 | --- | --- |
-| ![](docs/screenshots/login.png) | ![](docs/screenshots/analytics.png) |
-| **號碼（設定清單、連接渠道）** | **團隊（離職交接、AI 語氣）** |
-| ![](docs/screenshots/numbers.png) | ![](docs/screenshots/team.png) |
-| **今日（需要處理、時間表、渠道狀態）** | **導師糧單** |
-| ![](docs/screenshots/today.png) | ![](docs/screenshots/payroll.png) |
-| **設定 → AI 及知識庫** | |
-| ![](docs/screenshots/assistant.png) | |
-| **推廣（群發）** | |
-| ![](docs/screenshots/marketing.png) | |
+| ![](docs/screenshots/today.png) | ![](docs/screenshots/inbox.png) |
+| **客人（公司聯絡簿、試堂、標籤）** | **付款（FPS／PayMe 核實）** |
+| ![](docs/screenshots/customers.png) | ![](docs/screenshots/payments.png) |
+| **推廣（群發）** | **導師糧單** |
+| ![](docs/screenshots/marketing.png) | ![](docs/screenshots/payroll.png) |
+| **設定 → 渠道（設定清單、連接渠道）** | **設定 → AI 及知識庫** |
+| ![](docs/screenshots/channels.png) | ![](docs/screenshots/assistant.png) |
+| **設定 → 團隊（離職交接、AI 語氣）** | **登入** |
+| ![](docs/screenshots/team.png) | ![](docs/screenshots/login.png) |
+| **手機（390px）** | |
+| ![](docs/screenshots/mobile-thread.png) | |
 
 ## 尚未包括
 
-- 發送相片／文件（目前可以接收及備份所有媒體，發送只支援文字）
-- WhatsApp 模板訊息（官方 API 超過 24 小時後聯絡客人需要用模板）
-- AI 讀取相片和語音（目前客人傳相片／語音時會轉交同事）
+- 同事在收件匣手動附上相片／文件發送（系統已會自動發送收款 QR 及知識庫圖片；同事回覆仍只支援文字）
+- 在收件匣用模板回覆超過 24 小時的客人（WhatsApp 官方 API 的群發已支援模板）
+- AI 讀取相片及文件（語音訊息會先轉文字再由 AI 回答；相片和文件會轉交同事）
 - 群組對話（目前只處理一對一客戶對話）
 - 雙重認證、更細緻的權限
 - 多公司（multi-tenant）及收費
