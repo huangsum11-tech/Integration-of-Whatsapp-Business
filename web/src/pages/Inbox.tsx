@@ -414,6 +414,7 @@ function EventLine({ e }: { e: InboxEvent }) {
     ai_paused: e.user_id ? `${who} 暫停了 AI 自動回覆` : 'AI 自動回覆已暫停',
     ai_resumed: `${who} 恢復了 AI 自動回覆`,
     ai_error: 'AI 回覆失敗',
+    ai_clarify: 'AI 先問清楚，未轉交',
     trial: e.user_id ? `${who} 記錄了試堂` : 'AI 記錄了試堂',
     review: `${who} 發送了 Google 評價邀請`,
     payment: '付款',

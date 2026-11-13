@@ -35,7 +35,14 @@ export function hasKey(provider: Provider) {
   return Boolean(process.env[PROVIDERS[provider].keyEnv] || (provider === 'claude' && process.env.ANTHROPIC_AUTH_TOKEN))
 }
 
+/** Tests replace the model with a script; nothing in the app sets this. */
+let scripted: ((req: LlmRequest) => string) | null = null
+export function useScriptedModel(script: ((req: LlmRequest) => string) | null) {
+  scripted = script
+}
+
 export async function generate(req: LlmRequest): Promise<string> {
+  if (scripted) return scripted(req).trim()
   const { provider, model } = currentAi()
   if (!hasKey(provider)) throw new AiUnavailableError(`未設定 ${PROVIDERS[provider].keyEnv}，AI 暫不可用`)
   const text = provider === 'claude' ? await claude(model, req) : provider === 'gemini' ? await gemini(model, req) : await grok(model, req)

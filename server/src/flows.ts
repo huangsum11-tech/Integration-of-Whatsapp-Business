@@ -22,6 +22,11 @@ import { attachScreenshot, createPaymentRequest, markAwaitingPayment, paymentMes
 import { formatLocal, localParts, parseLocal } from './time.js'
 
 export type FlowReply = CustomerReply & { images?: string[]; flagForTeam?: string }
+/**
+ * The customer asked something else in the middle of a flow. The flow stays where it was:
+ * the FAQ or the AI answers the question, then `resume` asks the flow's question again.
+ */
+export type FlowAside = { action: 'aside'; resume: string }
 
 interface Flow { id: number; conversation_id: number; kind: 'trial' | 'purchase'; brand_id: number | null; step: string; data: string; status: string }
 type Data = Record<string, any>
@@ -33,7 +38,7 @@ const SENSITIVE: [RegExp, string][] = [
   [/退款|退錢|退返錢|退費|refund/i, '退款'],
   [/投訴|complain|唔滿意|不滿意|好失望|好差/i, '投訴'],
   [/扣堂|扣咗|被扣|點解扣|deduct/i, '扣堂爭議'],
-  [/受傷|傷患|懷孕|有孕|孕婦|手術|痛症|腰痛|背痛|膝痛|頸痛|膊頭痛|高血壓|心臟|醫生|物理治療|physio|injur|pregnan/i, '健康'],
+  [/受傷|傷患|傷咗|有傷|扭傷|拉傷|骨折|懷孕|有孕|孕婦|手術|痛症|腰痛|腰骨痛|背痛|膝痛|膝頭痛|頸痛|肩痛|膊頭痛|手痛|腳痛|椎間盤|高血壓|心臟|醫生|物理治療|physio|injur|pregnan/i, '健康'],
   [/餘額|剩幾多堂|剩返幾|仲有幾多堂|仲有幾堂|還有幾堂|未用幾多堂|balance/i, '個人餘額查詢'],
 ]
 export function sensitiveTopic(text: string) {
@@ -88,6 +93,11 @@ export function parseBookedTime(text: string, now = new Date()): number | null {
 }
 
 /** "我叫陳小美，想星期六晚上" → "陳小美" (best effort; teammates see the full answer anyway). */
+/** Looks like a question rather than an answer to the flow's question. */
+const QUESTION = /[?？]|嗎|有冇|有無|幾多|幾錢|幾耐|幾時|點樣|點解|點算|邊度|喺邊|邊個|可唔可以|可否|係咪|係唔係|使唔使|要唔要|會唔會|得唔得|^(?:how|what|where|when|why|which|can|could|do|does|is|are)\b/i
+/** Mentions a day or a time: an answer to "想上邊日、幾點？", even when phrased as a question. */
+const TIME_CUE = /星期|禮拜|礼拜|週|周末|聽日|明日|明天|後日|今日|今晚|下星期|\d+\s*(?:號|号|日|點|点|時|:|：|am|pm)|早上|朝早|上午|中午|下午|晏晝|晚上|夜晚|平日|weekend|weekday|morning|afternoon|evening|tonight|tomorrow|mon|tue|wed|thu|fri|sat|sun/i
+
 function guessName(text: string) {
   const called = text.match(/(?:我叫|叫我|我係|我是|稱呼|名字係|名叫)\s*([^\s，,。.!！、]{1,12})/)
   if (called) return called[1]
@@ -354,13 +364,78 @@ export function paymentDetails(flow: Flow | null, brand: Brand, request: Payment
   return { action: 'reply', text: message, images: brand.payment_qr_image ? [brand.payment_qr_image] : undefined }
 }
 
+// ---------- Questions in the middle of a flow ----------
+
+/** Does the message answer the step's question? Mirrors what trialStep / purchaseStep accept. */
+function answersStep(flow: Flow, text: string) {
+  const data: Data = JSON.parse(flow.data)
+  if (flow.step === 'branch') return Boolean(matchBranch(text, branchesOf()))
+  if (flow.kind === 'trial') {
+    const branch = data.branch ? branchByKey(data.branch) : undefined
+    const offers = branch ? trialOffersFor(branch.brand_id, branch.key) : []
+    if (flow.step === 'offer') {
+      const n = Number(text.match(/\d+/)?.[0])
+      return Boolean((n && offers[n - 1]) || offers.find((o) => text.toLowerCase().includes(o.label.toLowerCase())))
+    }
+    // Name and preferred time: a question that names no day or time is not an answer.
+    if (flow.step === 'info') return !QUESTION.test(text) || TIME_CUE.test(text)
+    if (flow.step === 'booking') return LINK_BROKEN.test(text) || HELP_BOOK.test(text) || parseBookedTime(text) !== null
+    return true
+  }
+  const brand = brandById(flow.brand_id)
+  const packages = brand ? packagesFor(brand.id) : []
+  if (flow.step === 'category') {
+    const cats = categories(packages)
+    const n = Number(text.match(/^\s*(\d)\s*$/)?.[1])
+    return Boolean((n && cats[n - 1]) || cats.find((c) => c.split(/[\s／]/).some((w) => w.length > 1 && text.toLowerCase().includes(w.toLowerCase()))))
+  }
+  if (flow.step === 'package') {
+    const options = packages.filter((p) => p.category === data.category)
+    const n = Number(text.match(/(\d+)/)?.[1])
+    return Boolean(options.find((p) => new RegExp(`(^|\\D)${p.sessions}\\s*堂`).test(text)) ?? (n && n <= options.length))
+  }
+  if (flow.step === 'confirm') return YES.test(text.trim()) || /唔要|取消|cancel|不了|唔買/i.test(text)
+  return true
+}
+
+/** The step's question, asked again after a side question is answered. */
+function resumePrompt(flow: Flow): string {
+  const data: Data = JSON.parse(flow.data)
+  if (flow.kind === 'trial') {
+    if (flow.step === 'branch') return `講返試堂：想去邊間分店？\n${branchMenu(branchesOf())}`
+    const branch = branchByKey(data.branch)
+    if (flow.step === 'offer' && branch) return `講返試堂：想試邊一個？\n${offerMenu(trialOffersFor(branch.brand_id, branch.key))}`
+    if (flow.step === 'info') return '講返試堂：請問點稱呼你？想上邊日、大約幾點？'
+    if (flow.step === 'booking') return '講返試堂：預約好之後，話我知你預約咗邊日、幾點就得 😊'
+    return ''
+  }
+  const brand = brandById(flow.brand_id)
+  if (flow.step === 'branch') return `講返套票：想買邊間分店嘅套票？\n${branchMenu(branchesOf())}`
+  if (!brand) return ''
+  const packages = packagesFor(brand.id)
+  if (flow.step === 'category') return `講返套票：想買邊類？\n${categories(packages).map((c, i) => `${i + 1}. ${c}`).join('\n')}`
+  if (flow.step === 'package') {
+    const options = packages.filter((p) => p.category === data.category)
+    return `講返套票：想要邊個？\n${options.map((p, i) => `${i + 1}. ${p.sessions} 堂 ${money(p.price)}`).join('\n')}`
+  }
+  if (flow.step === 'confirm') return '講返套票：確認購買嘅話，回覆「確認」就得；唔要可以回覆「取消」。'
+  return ''
+}
+
+/** A question that doesn't answer the flow's step: answer it first, then come back. */
+function asideFrom(flow: Flow, text: string): FlowAside | null {
+  if (!QUESTION.test(text) || answersStep(flow, text)) return null
+  const resume = resumePrompt(flow)
+  return resume ? { action: 'aside', resume } : null
+}
+
 // ---------- Entry point ----------
 
 /**
  * Called before the normal AI reply. Returns a reply when a flow handles the message,
  * or null to let the AI answer as usual.
  */
-export function handleFlows(conversationId: number, pending: { id: number; type: string; body: string; transcript: string | null }[]): FlowReply | null {
+export function handleFlows(conversationId: number, pending: { id: number; type: string; body: string; transcript: string | null }[]): FlowReply | FlowAside | null {
   // A payment screenshot was just queued for checking: acknowledge, never confirm.
   const paid = requestForScreenshot(pending.map((m) => m.id))
   if (paid) {
@@ -380,6 +455,9 @@ export function handleFlows(conversationId: number, pending: { id: number; type:
   }
   if (flow) {
     if (!text) return null
+    // A side question is not eaten as the step's answer: the flow stays put and resumes after it.
+    const aside = asideFrom(flow, text)
+    if (aside) return aside
     const reply = flow.kind === 'trial' ? trialStep(flow, text) : purchaseStep(flow, text)
     return reply.action === 'reply' && !reply.text ? null : reply
   }

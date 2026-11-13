@@ -5,14 +5,14 @@
  *   when the knowledge base doesn't cover the question. Once a person replies, the AI stays
  *   quiet in that conversation until someone resumes it or the conversation is closed.
  */
-import { customerReply, matchFaq, type CustomerReply } from './ai.js'
+import { customerReply, findFaq, type CustomerReply } from './ai.js'
 import { recordTrial } from './automation.js'
 import { sendReply } from './channels.js'
 import { all, get, getSetting, run } from './db.js'
 import { addEvent, getConversation, inboxEvents, previewOf, type MessageType } from './inbox.js'
 import { broadcast } from './realtime.js'
 import { canTranscribe } from './transcribe.js'
-import { activeFlow, endFlow, handleFlows, type FlowReply } from './flows.js'
+import { activeFlow, endFlow, handleFlows, sensitiveTopic, type FlowReply } from './flows.js'
 import { HUMAN_BUTTON } from './meta.js'
 import { brandOfConversation } from './brands.js'
 import { sendImage } from './channels.js'
@@ -59,6 +59,32 @@ export async function requestHuman(conversationId: number) {
     await sendReply(conversationId, getSetting('handoff_message').trim() || DEFAULT_HANDOFF, { userId: null, aiAuto: true })
   }
   return true
+}
+
+/** The customer asks for a person in their own words. */
+const PERSON_REQUEST = /真人|搵人|人工|職員|staff|human|real person|打電話俾我|call me/i
+
+/** Was the AI's last message to this customer its one clarifying question? */
+function justClarified(conversationId: number) {
+  const lastOut = get<{ ts: number; ai_auto: number; body: string }>(
+    'SELECT ts, ai_auto, body FROM messages WHERE conversation_id = ? AND from_me = 1 ORDER BY ts DESC, id DESC LIMIT 1', conversationId,
+  )
+  const lastClarify = get<{ ts: number; body: string }>("SELECT ts, body FROM events WHERE conversation_id = ? AND kind = 'ai_clarify' ORDER BY id DESC LIMIT 1", conversationId)
+  // Timestamps are in seconds, so also check that the last message really is that question.
+  return Boolean(lastOut?.ai_auto && lastClarify && lastClarify.ts >= lastOut.ts && lastClarify.body === lastOut.body)
+}
+
+/**
+ * Red lines for clarifying questions, enforced here rather than trusted to the prompt:
+ * cases that must go to a person are never delayed by a question, and the AI asks at most once.
+ */
+export function guardClarify(conversationId: number, customerText: string, reply: CustomerReply): CustomerReply {
+  if (reply.action !== 'reply' || !reply.clarify) return reply
+  const topic = sensitiveTopic(customerText)
+  if (topic) return { action: 'handoff', reason: `客人提及${topic}，需要同事處理` }
+  if (PERSON_REQUEST.test(customerText)) return { action: 'handoff', reason: '客人要求真人' }
+  if (justClarified(conversationId)) return { action: 'handoff', reason: '澄清後仍未清楚，需要同事處理' }
+  return reply
 }
 
 /** The 「同真人講」 button is only on WhatsApp Cloud API numbers, so only they take the request. */
@@ -139,7 +165,10 @@ async function respond(conversationId: number) {
 
   let reply: FlowReply
   // Guided trial / purchase flows (and sensitive topics) come before FAQs and the AI.
-  const flowReply = handleFlows(conversationId, pending)
+  const outcome = handleFlows(conversationId, pending)
+  // A question asked in the middle of a flow: answer it below, then ask the flow's question again.
+  const aside = outcome?.action === 'aside' ? outcome : null
+  const flowReply = outcome && outcome.action !== 'aside' ? outcome : null
   const nonText = pending.find((m) => m.type !== 'text' && !m.transcript)
   const recentAuto = get<{ c: number }>(
     'SELECT COUNT(*) AS c FROM messages WHERE conversation_id = ? AND ai_auto = 1 AND ts > unixepoch() - 3600', conversationId,
@@ -153,8 +182,10 @@ async function respond(conversationId: number) {
     reply = { action: 'handoff', reason: '一小時內自動回覆次數已達上限' }
   } else {
     // An exact FAQ answer only fits when it's what the latest message asks; anything else goes to the AI.
-    const faq = matchFaq(pending[0].transcript ?? pending[0].body, brandOfConversation(conversationId)?.id)
-    reply = faq ? { action: 'reply', text: faq.body } : await customerReply(conversationId)
+    const faq = findFaq(pending[0].transcript ?? pending[0].body, brandOfConversation(conversationId)?.id)
+    reply = faq
+      ? { action: 'reply', text: faq.body }
+      : guardClarify(conversationId, pending.map((m) => m.transcript ?? m.body).join('\n'), await customerReply(conversationId, aside ? { resume: aside.resume } : undefined))
   }
 
   // A teammate may have answered, or another customer message arrived, while the AI was thinking.
@@ -165,8 +196,9 @@ async function respond(conversationId: number) {
   if (!now || now.latest !== latestId || (mode === 'auto' && now.ai_paused)) return
 
   if (mode === 'suggest') {
+    const suggestion = reply.action === 'reply' ? (aside ? `${reply.text}\n\n${aside.resume}` : reply.text) : null
     run('UPDATE conversations SET ai_suggestion = ?, needs_human = ? WHERE id = ?',
-      reply.action === 'reply' ? reply.text : null, reply.action === 'handoff' ? 1 : 0, conversationId)
+      suggestion, reply.action === 'handoff' ? 1 : 0, conversationId)
     if (reply.action === 'handoff') addEvent(conversationId, null, 'ai_handoff', reply.reason)
   } else if (reply.action === 'reply') {
     // FAQ answers and AI-written replies offer 「同真人講」; guided flow steps don't.
@@ -174,6 +206,11 @@ async function respond(conversationId: number) {
     for (const image of reply.images ?? []) {
       await sendImage(conversationId, image, '', { userId: null, aiAuto: true }).catch((err) => console.warn('Image not sent', err))
     }
+    // Remember the one clarifying question, so a second one in a row becomes a handoff.
+    if (reply.clarify) addEvent(conversationId, null, 'ai_clarify', reply.text)
+    // Back to the flow, as its own message (a flow message: no button) — unless the AI is
+    // waiting for the answer to its clarifying question.
+    if (aside && !reply.clarify) await sendReply(conversationId, aside.resume, { userId: null, aiAuto: true })
   } else {
     run('UPDATE conversations SET ai_paused = 1, needs_human = 1 WHERE id = ?', conversationId)
     addEvent(conversationId, null, 'ai_handoff', reply.reason)

@@ -10,6 +10,7 @@ import { canSend, sendReply, sendToPhone } from './channels.js'
 import { CONTACT_NAME_SQL, CONTACT_PHONE_SQL, SOCIAL_SQL, all, get, getSetting, run, setSetting, tx } from './db.js'
 import { INSTRUCTOR_CHAT_SQL, addEvent, getConversation, getTimeline, listConversations } from './inbox.js'
 import { TEMPLATE_PATH, exportCsv, importCsv, importTemplate } from './knowledge.js'
+import { semanticThreshold } from './faqmatch.js'
 import { PROVIDERS, currentAi, hasKey, type Provider } from './llm.js'
 import {
   DEFAULT_TEMPLATE, analyzeReport, createRun, getRun, listRuns, payrollSettings, render, savePayrollSettings, sendRun,
@@ -420,6 +421,7 @@ api.get('/ai/settings', (_req, res) => {
     handoff_message: getSetting('handoff_message'),
     trial_booking_url: getSetting('trial_booking_url'),
     booking_url: getSetting('booking_url'),
+    faq_semantic_threshold: semanticThreshold(),
   })
 })
 
@@ -432,6 +434,7 @@ api.put('/ai/settings', requireAdmin, (req, res) => {
     handoff_message: z.string().max(500).optional(),
     trial_booking_url: z.string().max(500).optional(),
     booking_url: z.string().max(500).optional(),
+    faq_semantic_threshold: z.number().min(0).max(1).optional(),
   }), req)
   tx(() => {
     if (b.provider) setSetting('ai_provider', b.provider)
@@ -439,6 +442,7 @@ api.put('/ai/settings', requireAdmin, (req, res) => {
     for (const key of ['business_name', 'business_intro', 'handoff_message', 'trial_booking_url', 'booking_url'] as const) {
       if (b[key] !== undefined) setSetting(key, b[key]!)
     }
+    if (b.faq_semantic_threshold !== undefined) setSetting('faq_semantic_threshold', String(b.faq_semantic_threshold))
   })
   res.json({ ok: true })
 })

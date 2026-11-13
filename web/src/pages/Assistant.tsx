@@ -129,6 +129,7 @@ function BusinessCard({ settings, isAdmin, onSaved }: { settings: AiSettings; is
   const pick = (s: AiSettings) => ({
     business_name: s.business_name, business_intro: s.business_intro, handoff_message: s.handoff_message,
     trial_booking_url: s.trial_booking_url, booking_url: s.booking_url,
+    faq_semantic_threshold: s.faq_semantic_threshold,
   })
   const [form, setForm] = useState(pick(settings))
   const [saved, setSaved] = useState(false)
@@ -169,6 +170,15 @@ function BusinessCard({ settings, isAdmin, onSaved }: { settings: AiSettings; is
           <input id="biz-booking" className="input" type="url" disabled={!isAdmin} value={form.booking_url}
             placeholder="例如 Vibefam 時間表／App 下載頁"
             onChange={(e) => setForm({ ...form, booking_url: e.target.value.trim() })} />
+        </div>
+        <div>
+          <label className="label" htmlFor="biz-faq-threshold">常見問題語意配對門檻（0–1；0 = 只用關鍵字）</label>
+          <input id="biz-faq-threshold" className="input" type="number" min={0} max={1} step={0.05} disabled={!isAdmin}
+            value={form.faq_semantic_threshold}
+            onChange={(e) => setForm({ ...form, faq_semantic_threshold: Math.min(1, Math.max(0, Number(e.target.value) || 0)) })} />
+          <p className="faint" style={{ fontSize: 12, margin: '4px 0 0' }}>
+            客人用其他字眼問常見問題時，相似度達到門檻就直接用常見問題答案；越高越嚴格。建議 0.4。
+          </p>
         </div>
         {isAdmin && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>

@@ -95,6 +95,8 @@ export interface AiSettings {
   providers: { id: string; label: string; keyEnv: string; hasKey: boolean; defaultModel: string; model: string }[]
   business_name: string; business_intro: string; handoff_message: string
   trial_booking_url: string; booking_url: string
+  /** Similarity needed to answer with an FAQ asked in other words (0 = off). */
+  faq_semantic_threshold: number
 }
 
 export interface Trial {
