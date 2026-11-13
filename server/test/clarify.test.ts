@@ -120,6 +120,12 @@ test('grounding unchanged and v2 rules present in what the model is told', async
   assert.match(instructions, /corporate partnership, a job, or a media enquiry/)
   assert.match(instructions, /never ask for ID card numbers, bank details or passwords/)
   assert.match(instructions, /don't ask them to repeat it/)
+  // Aligned with system_prompt_v2 (Sum, 2026-11-13): knowledge base only, no guessing, no stock phrases.
+  assert.match(instructions, /Answer only from the knowledge base and the <brand> block below, for everything/)
+  assert.match(instructions, /never guess opening hours, today's free spots/)
+  assert.match(instructions, /Never tell the customer a booking is confirmed/)
+  assert.match(instructions, /No customer-service stock phrases/)
+  assert.doesNotMatch(instructions, /from general knowledge/)
   assert.match(instructions, /Combine everything that is written into one answer/)
   assert.match(instructions, /never fill the gap with a guess/)
   assert.match(instructions, /spoken Cantonese/)

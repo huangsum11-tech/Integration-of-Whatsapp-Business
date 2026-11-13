@@ -312,7 +312,7 @@ h1, h2, h3 { font-family: var(--font-display); margin: 0; letter-spacing: -0.01e
   .rail-btn { width: auto; flex: 1 0 auto; min-width: 48px; padding-left: 4px; padding-right: 4px; font-size: 10px; white-space: nowrap; }
   .rail .logo, .rail .spacer { display: none; }
   .rail-btn.active::before { display: none; }
-  .inbox { grid-template-columns: 1fr; }
+  .inbox { grid-template-columns: minmax(0, 1fr); }
   .inbox.has-active .list-pane { display: none; }
   .inbox:not(.has-active) .thread { display: none; }
   .back-btn { display: inline-flex; }

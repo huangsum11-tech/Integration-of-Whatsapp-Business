@@ -273,10 +273,11 @@ function categoryPrompt(flow: Flow, brand: Brand): FlowReply {
 function discountNote(conversationId: number, text: string) {
   const contactId = getConversation(conversationId)?.contact_id
   const recentTrial = get<{ class_at: number }>(
-    "SELECT class_at FROM trials WHERE contact_id = ? AND status = 'booked' AND class_at <= unixepoch() AND class_at > unixepoch() - 86400",
+    "SELECT class_at FROM trials WHERE contact_id = ? AND status = 'booked' AND class_at <= unixepoch() AND class_at > unixepoch() - 7 * 86400",
     contactId,
   )
-  if (recentTrial) return '試堂後 24 小時內購買'
+  // Studio rule (Sum, 2026-11-13): 95 折 when buying within one week after the trials.
+  if (recentTrial) return '試堂後一星期內購買'
   if (/優惠|折|discount|off|同行|朋友一齊|續堂|續套票|11\.11|雙十一/i.test(text)) return `客人提及優惠：「${text.slice(0, 60)}」`
   return ''
 }

@@ -120,7 +120,7 @@ function BrandCard({ brand, admin, onSaved }: { brand: BrandFull; admin: boolean
             {field('booking_steps', '預約步驟（傳給客人）', undefined, true)}
             <ImageField label="預約步驟圖片（可選）" path={brand.booking_steps_image} onPick={(f) => upload('steps', f)}
               onRemove={() => api(`/brands/${brand.id}/image/steps`, { method: 'DELETE' }).then(onSaved)} />
-            {field('after_trial_offer', '試堂後跟進時附上的優惠（知識庫原文；留空則不提）', '例如：試堂後 24 小時內購買套票 95 折（FPS／PayMe）')}
+            {field('after_trial_offer', '試堂後跟進時附上的優惠（知識庫原文；留空則不提）', '例如：完成所有試堂後一星期內購買套票 95 折（FPS／PayMe）')}
           </div>
           <div className="form-stack">
             <h3 className="brand-sub">FPS／PayMe 收款</h3>
