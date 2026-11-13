@@ -482,13 +482,15 @@ function SidePanel({ detail, reload }: { detail: Detail; reload: () => void }) {
   return (
     <aside className="side-pane" aria-label="客戶資料">
       <div className="contact-hero">
-        <Avatar name={contact.name || contact.saved_name || contact.wa_name || contact.phone || '?'} size={64} />
-        <input className="input" style={{ textAlign: 'center', fontWeight: 700, fontSize: 16, border: '1px solid transparent' }}
-          value={name} placeholder={contact.saved_name ?? contact.wa_name ?? '加入名稱'} onChange={(e) => setName(e.target.value)}
+        <Avatar name={contact.wa_name || contact.name || contact.saved_name || contact.phone || '?'} size={64} />
+        {contact.wa_name && <b style={{ fontSize: 16 }}>{contact.wa_name}</b>}
+        {contact.wa_name && <span className="faint" style={{ fontSize: 12 }}>{contact.social ?? 'WhatsApp'} 名稱（客人自己設定）</span>}
+        {/* A teammate's name only shows while the customer has not set a name of their own. */}
+        <input className="input" style={{ textAlign: 'center', fontWeight: contact.wa_name ? 400 : 700, fontSize: contact.wa_name ? 13 : 16, border: '1px solid transparent' }}
+          value={name} placeholder={contact.wa_name ? '同事備註名稱（選填）' : contact.saved_name ?? '加入名稱'} onChange={(e) => setName(e.target.value)}
           onBlur={() => name !== (contact.name ?? '') && saveContact({ name: name || null })} aria-label="客戶名稱" />
         <span className="muted">{contact.social ? `${contact.social} 用戶` : formatPhone(contact.phone) || '號碼未解析'}</span>
-        {contact.saved_name && contact.name && contact.saved_name !== contact.name && <span className="faint" style={{ fontSize: 12 }}>手機通訊錄：{contact.saved_name}</span>}
-        {contact.wa_name && contact.wa_name !== (contact.name ?? contact.saved_name) && <span className="faint" style={{ fontSize: 12 }}>{contact.social ?? 'WhatsApp'} 名稱：{contact.wa_name}</span>}
+        {contact.saved_name && contact.saved_name !== (contact.wa_name ?? contact.name) && <span className="faint" style={{ fontSize: 12 }}>手機通訊錄：{contact.saved_name}</span>}
         {!contact.phone && !contact.social && <ResolveNumber numberId={conversation.number_id} onDone={reload} />}
       </div>
 

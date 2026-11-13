@@ -455,9 +455,13 @@ export function setSetting(key: string, value: string) {
  */
 export const SOCIAL_SQL = "CASE WHEN ct.phone LIKE 'ig:%' THEN 'Instagram' WHEN ct.phone LIKE 'fb:%' THEN 'Facebook' WHEN ct.phone LIKE 'th:%' THEN 'Threads' END"
 const NO_PHONE_SQL = `ct.phone = ct.lid OR (${SOCIAL_SQL}) IS NOT NULL`
-/** Display name: Baton edit, then phone contact list, then the customer's own WhatsApp/Instagram name, then number. */
+/**
+ * Display name: the name the customer set on WhatsApp/Instagram themselves, then a teammate's name
+ * for them, then the phone contact list, then the number. Teammate and contact-list names are kept
+ * and shown only while the customer has no name of their own.
+ */
 export const CONTACT_NAME_SQL =
-  `COALESCE(ct.name, ct.saved_name, ct.wa_name, CASE WHEN ${NO_PHONE_SQL} THEN NULL ELSE ct.phone END,
+  `COALESCE(ct.wa_name, ct.name, ct.saved_name, CASE WHEN ${NO_PHONE_SQL} THEN NULL ELSE ct.phone END,
     (${SOCIAL_SQL}) || ' 用戶', CASE WHEN ct.lid IS NOT NULL THEN '號碼未解析' ELSE '未知號碼' END)`
 /** The real phone number, or NULL while WhatsApp still hides it behind a LID (or for Instagram customers). */
 export const CONTACT_PHONE_SQL = `CASE WHEN ${NO_PHONE_SQL} THEN NULL ELSE ct.phone END`

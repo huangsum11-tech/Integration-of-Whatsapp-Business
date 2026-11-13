@@ -1,7 +1,7 @@
 /**
  * D. Customer identity alignment: no raw LID digits in the inbox, LIDs merged into the real
  * number once known, Cloud API by wa_id + profile name, Instagram username + name, and the
- * display order 同事儲存名 > WhatsApp／IG 名 > 電話.
+ * display order 客人自己的 WhatsApp／IG 名 > 同事儲存名 > 手機通訊錄名 > 電話.
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -73,15 +73,18 @@ test('old data: hosted LID stored as a phone number is repaired at start-up', ()
   assert.equal(contactOf(conv).contact_name, '號碼未解析')
 })
 
-test('display order: 同事儲存名 > 手機通訊錄名 > WhatsApp 名 > 電話', () => {
+test('display order: 客人自己的 WhatsApp 名 > 同事儲存名 > 手機通訊錄名 > 電話', () => {
   const s = store('85291112233@s.whatsapp.net', { pn: '85291112233' }, 'WA Name')
   const id = contactOf(s.conversationId).contact_id
   assert.equal(contactOf(s.conversationId).contact_name, 'WA Name')
-  db.run("UPDATE contacts SET saved_name = 'Phonebook Name' WHERE id = ?", id)
-  assert.equal(contactOf(s.conversationId).contact_name, 'Phonebook Name')
-  db.run("UPDATE contacts SET name = 'Staff Name' WHERE id = ?", id)
+  // The customer's own name wins over names the team saved, which are kept, not overwritten.
+  db.run("UPDATE contacts SET saved_name = 'Phonebook Name', name = 'Staff Name' WHERE id = ?", id)
+  assert.equal(contactOf(s.conversationId).contact_name, 'WA Name')
+  db.run('UPDATE contacts SET wa_name = NULL WHERE id = ?', id)
   assert.equal(contactOf(s.conversationId).contact_name, 'Staff Name')
-  db.run('UPDATE contacts SET name = NULL, saved_name = NULL, wa_name = NULL WHERE id = ?', id)
+  db.run('UPDATE contacts SET name = NULL WHERE id = ?', id)
+  assert.equal(contactOf(s.conversationId).contact_name, 'Phonebook Name')
+  db.run('UPDATE contacts SET saved_name = NULL WHERE id = ?', id)
   assert.equal(contactOf(s.conversationId).contact_name, '85291112233')
 })
 
