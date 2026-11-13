@@ -8,7 +8,7 @@ import crypto from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import path from 'node:path'
-import { get, run, setSetting } from './db.js'
+import { all, get, run, setSetting } from './db.js'
 import { setMessageMedia, storeMessage, type MessageType } from './inbox.js'
 import { broadcast } from './realtime.js'
 import { MEDIA_DIR } from './whatsapp.js'
@@ -320,6 +320,110 @@ export async function replyToFacebookComment(numberId: number, commentId: string
 export async function replyToInstagramComment(numberId: number, commentId: string, text: string) {
   const config = numberConfig<InstagramConfig>(numberId)
   return graph(`${igBase(config)}/${encodeURIComponent(commentId)}/replies`, config.accessToken, { method: 'POST', body: { message: text } })
+}
+
+// ---------- Instagram history sync (TASK-9) ----------
+
+export interface IgHistorySummary { conversations: number; messages: number; skipped: number }
+
+type IgParticipant = { id?: string; username?: string }
+type IgAttachment = {
+  id?: string; mime_type?: string; name?: string
+  image_data?: { url?: string }; video_data?: unknown; file_url?: string
+}
+type IgHistoryMessage = {
+  id?: string; created_time?: string; message?: string
+  from?: IgParticipant
+  /** Meta returns the recipients as { data: [...] }; accept a bare object too. */
+  to?: { data?: IgParticipant[] } | IgParticipant
+  attachments?: { data?: IgAttachment[] }
+}
+type IgConversation = { id?: string; participants?: { data?: IgParticipant[] } }
+type GraphPage<T> = { data?: T[]; paging?: { next?: string } }
+
+/** Safety cap so a huge account cannot page Meta (or us) forever: 100 pages per edge. */
+const HISTORY_MAX_PAGES = 100
+
+/** Follow paging.next through a Graph edge, up to the page cap. */
+async function graphAll<T>(firstUrl: string, token: string): Promise<T[]> {
+  const out: T[] = []
+  let url: string | undefined = firstUrl
+  for (let page = 0; url && page < HISTORY_MAX_PAGES; page++) {
+    const r: GraphPage<T> = await graph<GraphPage<T>>(url, token)
+    out.push(...(r.data ?? []))
+    url = r.paging?.next
+  }
+  return out
+}
+
+function historyMessageShape(m: IgHistoryMessage): { type: MessageType; body: string; mediaMime: string | null } {
+  const text = m.message ?? ''
+  if (text) return { type: 'text', body: text, mediaMime: null }
+  // Media itself is not downloaded; only its type / mime metadata is kept.
+  const att = m.attachments?.data?.[0]
+  if (!att) return { type: 'other', body: '', mediaMime: null }
+  const mime = att.mime_type ?? null
+  const type: MessageType = mime?.startsWith('image/') || att.image_data ? 'image'
+    : mime?.startsWith('video/') || att.video_data ? 'video'
+      : mime?.startsWith('audio/') ? 'audio'
+        : att.file_url ? 'document' : 'other'
+  return { type, body: att.name ?? '', mediaMime: mime }
+}
+
+/**
+ * Import an Instagram account's pre-existing DM conversations. Manual and idempotent:
+ * messages are filed by their Meta id through the normal store, so re-running adds
+ * nothing. Everything is stored as history (live: false) — no unread badges, no AI
+ * replies, no waiting alerts, and nothing is ever sent. Conversations the sync itself
+ * creates are closed; conversations that already existed keep their state.
+ */
+export async function syncInstagramHistory(numberId: number): Promise<IgHistorySummary> {
+  const config = numberConfig<InstagramConfig>(numberId)
+  const base = igBase(config)
+  // Facebook route reads the conversation list through the Page when one is linked.
+  const owner = config.host === 'facebook' && config.pageId ? config.pageId : config.igUserId
+  const ownIds = new Set([config.igUserId, config.pageId].filter(Boolean).map(String))
+  const before = new Set(all<{ id: number }>('SELECT id FROM conversations WHERE number_id = ?', numberId).map((c) => c.id))
+  const summary: IgHistorySummary = { conversations: 0, messages: 0, skipped: 0 }
+  const fresh = new Set<number>()
+
+  const conversations = await graphAll<IgConversation>(
+    `${base}/${encodeURIComponent(owner)}/conversations?platform=instagram&fields=id,participants{id,username}&limit=100`,
+    config.accessToken,
+  )
+  for (const conv of conversations) {
+    if (!conv.id) continue
+    const participants = conv.participants?.data ?? []
+    const messages = await graphAll<IgHistoryMessage>(
+      `${base}/${encodeURIComponent(conv.id)}/messages?fields=id,created_time,from{id,username},to{id,username},message,attachments&limit=100`,
+      config.accessToken,
+    )
+    for (const m of messages) {
+      if (!m.id) { summary.skipped++; continue }
+      const fromMe = ownIds.has(String(m.from?.id ?? ''))
+      const toList: IgParticipant[] = !m.to ? []
+        : 'data' in m.to && Array.isArray(m.to.data) ? m.to.data
+          : [m.to as IgParticipant]
+      // The customer is the sender of an incoming message, a recipient of ours, or the
+      // conversation's other participant when neither names them.
+      const notUs = (p: IgParticipant) => Boolean(p.id) && !ownIds.has(String(p.id))
+      const other = fromMe ? toList.find(notUs) ?? participants.find(notUs) : m.from
+      const ts = Math.floor(Date.parse(m.created_time ?? '') / 1000)
+      if (!other?.id || !Number.isFinite(ts)) { summary.skipped++; continue }
+      const shape = historyMessageShape(m)
+      const stored = storeMessage({
+        numberId, jid: `${other.id}@instagram`, contact: { ig: String(other.id) },
+        waName: other.username ? `@${other.username}` : undefined,
+        waId: m.id, fromMe, type: shape.type, body: shape.body, mediaMime: shape.mediaMime, ts, live: false,
+      })
+      if (!stored) { summary.skipped++; continue } // Already in the DB (dedupe by Meta message id).
+      summary.messages++
+      if (!before.has(stored.conversationId)) fresh.add(stored.conversationId)
+    }
+  }
+  for (const id of fresh) run("UPDATE conversations SET status = 'closed', unread = 0 WHERE id = ?", id)
+  summary.conversations = fresh.size
+  return summary
 }
 
 // ---------- Webhook ----------

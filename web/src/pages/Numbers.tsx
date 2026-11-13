@@ -43,6 +43,19 @@ export default function Numbers() {
       setSyncing(null)
     }
   }
+  const [historySyncing, setHistorySyncing] = useState<number | null>(null)
+  const syncHistory = async (id: number) => {
+    setHistorySyncing(id); setSyncResult('')
+    try {
+      const r = await api<{ conversations: number; messages: number; skipped: number }>(`/numbers/${id}/sync-instagram-history`, { method: 'POST' })
+      setSyncResult(`歷史對話同步完成：新增 ${r.conversations} 個對話、${r.messages} 條訊息${r.skipped ? `，跳過 ${r.skipped} 條已有紀錄` : ''}。匯入的對話會標示為已完成，不會觸發自動回覆。`)
+      refreshNumbers()
+    } catch (err) {
+      setSyncResult(err instanceof Error ? err.message : '同步失敗')
+    } finally {
+      setHistorySyncing(null)
+    }
+  }
   const reconnect = async (id: number) => { await api(`/numbers/${id}/reconnect`, { method: 'POST' }); setLinkingId(id) }
   const unlink = async (n: WaNumber) => {
     const what = n.channel === 'wa_web' ? '解除連結後不會再收到新訊息' : '會刪除儲存的存取權杖，之後不會再收發訊息'
@@ -107,6 +120,7 @@ export default function Numbers() {
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {!official && n.status !== 'connected' && <button className="btn sm primary" onClick={() => reconnect(n.id)}><Icon name="qr" size={14} />{n.status === 'qr' ? '顯示 QR Code' : '重新連接'}</button>}
                   {!official && n.status === 'connected' && <button className="btn sm" disabled={syncing === n.id} onClick={() => syncContacts(n.id)}><Icon name="contacts" size={14} />{syncing === n.id ? '同步中…' : '同步聯絡人'}</button>}
+                  {n.channel === 'instagram' && n.status === 'connected' && <button className="btn sm" disabled={historySyncing === n.id} onClick={() => syncHistory(n.id)}><Icon name="clock" size={14} />{historySyncing === n.id ? '同步中…' : '同步歷史對話'}</button>}
                   {n.status !== 'unlinked' && <button className="btn sm danger" onClick={() => unlink(n)}>{official ? '中斷連接' : '解除連結'}</button>}
                 </div>
               )}

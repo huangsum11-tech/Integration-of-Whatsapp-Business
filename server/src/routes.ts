@@ -25,7 +25,7 @@ import { canTranscribe } from './transcribe.js'
 import {
   SEGMENTS, allTags, audienceContacts, getCampaign, importContacts, listCampaigns, saveCampaign, sendCampaign, sendTest, setTags, tagsFor,
 } from './campaigns.js'
-import { handleWebhook, subscribeWebhooks, validSignature, verifyCloud, verifyInstagram, verifyMessenger } from './meta.js'
+import { handleWebhook, subscribeWebhooks, syncInstagramHistory, validSignature, verifyCloud, verifyInstagram, verifyMessenger } from './meta.js'
 import { verifyThreads } from './threads.js'
 import { setupStatus } from './setup.js'
 import { studio } from './routes-studio.js'
@@ -270,6 +270,26 @@ api.post('/numbers/:id/unlink', requireAdmin, async (req, res) => {
   run("UPDATE numbers SET status = 'unlinked' WHERE id = ?", id)
   broadcast('number', { id, status: 'unlinked' })
   res.json({ ok: true })
+})
+
+/** Import an Instagram account's older DMs from Meta (TASK-9). Read-only on Meta; safe to re-run. */
+const igHistorySyncRunning = new Set<number>()
+api.post('/numbers/:id/sync-instagram-history', requireAdmin, async (req, res) => {
+  const id = Number(req.params.id)
+  const number = get<{ channel: string; status: string }>('SELECT channel, status FROM numbers WHERE id = ?', id)
+  if (!number) return res.status(404).json({ error: '找不到號碼' })
+  if (number.channel !== 'instagram') return res.status(400).json({ error: '只有 Instagram 帳戶可以同步歷史對話' })
+  if (number.status !== 'connected') return res.status(409).json({ error: '此帳戶未連接' })
+  if (igHistorySyncRunning.has(id)) return res.status(409).json({ error: '歷史對話同步進行中，請稍候' })
+  igHistorySyncRunning.add(id)
+  try {
+    res.json(await syncInstagramHistory(id))
+  } catch (err) {
+    // Meta's own error wording is shown verbatim so the team can act on it.
+    res.status(400).json({ error: err instanceof Error ? err.message : '同步失敗' })
+  } finally {
+    igHistorySyncRunning.delete(id)
+  }
 })
 
 /** Fill in hidden phone numbers and re-download saved names from the phone's contact list. */
