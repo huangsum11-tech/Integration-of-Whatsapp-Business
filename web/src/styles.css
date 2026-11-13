@@ -145,7 +145,7 @@ h1, h2, h3 { font-family: var(--font-display); margin: 0; letter-spacing: -0.01e
 .num { font-variant-numeric: tabular-nums; }
 
 /* ---------- Inbox ---------- */
-.inbox { display: grid; grid-template-columns: 340px minmax(0, 1fr) 320px; height: 100%; }
+.inbox { display: grid; grid-template-columns: 340px minmax(0, 1fr) 320px; grid-template-rows: minmax(0, 1fr); height: 100%; }
 .list-pane { border-right: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; min-height: 0; }
 .list-head { padding: 18px 16px 10px; display: flex; flex-direction: column; gap: 12px; }
 .list-head h2 { font-size: 20px; }
@@ -420,13 +420,13 @@ fieldset.form-stack { border: 0; margin: 0; padding: 0; min-width: 0; }
 }
 .area-tab:hover { color: var(--text); }
 .area-tab.active { color: var(--text); font-weight: 500; border-bottom-color: var(--pine); }
-.area-body { flex: 1; min-height: 0; }
+.area-body { flex: 1; min-height: 0; overflow-y: auto; }
 .area-body > .page { height: 100%; }
 .narrow { max-width: 760px; }
 
 /* Settings: a quiet list of sections on the left, the section on the right. */
-.hub { display: grid; grid-template-columns: 248px minmax(0, 1fr); height: 100%; }
-.hub-nav { border-right: 1px solid var(--line); padding: 28px 14px; display: flex; flex-direction: column; gap: 2px; background: var(--paper); }
+.hub { display: grid; grid-template-columns: 248px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100%; }
+.hub-nav { border-right: 1px solid var(--line); padding: 28px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; background: var(--paper); }
 .hub-nav h1 { font-size: 24px; padding: 0 10px 14px; }
 .hub-link { display: flex; gap: 12px; align-items: flex-start; padding: 10px; border-radius: var(--radius-sm); color: var(--text); text-decoration: none; }
 .hub-link svg { margin-top: 2px; color: var(--muted); flex-shrink: 0; }
@@ -437,7 +437,8 @@ fieldset.form-stack { border: 0; margin: 0; padding: 0; min-width: 0; }
 .hub-link.active { background: var(--surface); box-shadow: inset 3px 0 0 var(--pine); }
 .hub-link.active svg { color: var(--pine); }
 .hub-note { padding: 10px; font-size: 12px; }
-.hub-body { min-width: 0; height: 100%; }
+/* The section scrolls inside its own column; without a bounded row the page grew past the screen and was cut off. */
+.hub-body { min-width: 0; min-height: 0; height: 100%; overflow-y: auto; }
 
 /* Today */
 .today { max-width: 1240px; }
