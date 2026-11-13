@@ -81,7 +81,7 @@ export interface WaNumber {
   /** The brand whose prices, links and payment details this number uses. */
   brand_id: number | null
   /** Official API IDs (never the access token). */
-  ids: { phoneNumberId?: string; igUserId?: string; pageId?: string; userId?: string; username?: string; name?: string }
+  ids: { phoneNumberId?: string; igUserId?: string; pageId?: string; userId?: string; username?: string; name?: string; host?: 'instagram' | 'facebook'; expiresAt?: number; tokenType?: string }
 }
 
 export type KnowledgeCategory = 'faq' | 'policy' | 'class' | 'other'

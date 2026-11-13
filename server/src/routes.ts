@@ -161,7 +161,11 @@ const newNumber = z.discriminatedUnion('channel', [
     channel: z.literal('wa_cloud'), label: z.string().min(1).max(60),
     phoneNumberId: z.string().regex(/^\d+$/, '電話號碼 ID 只包含數字'), accessToken: z.string().min(20),
   }),
-  z.object({ channel: z.literal('instagram'), label: z.string().min(1).max(60), accessToken: z.string().min(20) }),
+  z.object({
+    channel: z.literal('instagram'), label: z.string().min(1).max(60), accessToken: z.string().trim().min(20),
+    // Only needed for a Facebook-platform (EAA) token that can't find the account by itself.
+    igUserId: z.string().trim().regex(/^\d*$/, 'Instagram 用戶 ID 只包含數字').optional(),
+  }),
   z.object({
     channel: z.literal('messenger'), label: z.string().min(1).max(60),
     pageId: z.string().regex(/^\d+$/, '專頁 ID 只包含數字'), accessToken: z.string().min(20),
@@ -176,10 +180,11 @@ async function officialConfig(b: z.infer<typeof newNumber>) {
     return { phone: info.phone, key: 'phoneNumberId', id: b.phoneNumberId, config: { phoneNumberId: b.phoneNumberId, accessToken: b.accessToken } }
   }
   if (b.channel === 'instagram') {
-    const info = await verifyInstagram(b.accessToken)
+    const info = await verifyInstagram(b.accessToken, b.igUserId)
     return {
       phone: info.username ? `@${info.username}` : null, key: 'igUserId', id: info.igUserId,
-      config: { igUserId: info.igUserId, username: info.username, accessToken: b.accessToken, refreshedAt: Math.floor(Date.now() / 1000) },
+      // IGAA tokens are refreshed by tokens.ts from refreshedAt; EAA tokens keep their own expiry.
+      config: { ...info, refreshedAt: Math.floor(Date.now() / 1000) },
     }
   }
   if (b.channel === 'messenger') {

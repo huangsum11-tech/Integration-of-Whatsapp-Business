@@ -82,6 +82,7 @@ export default function Numbers() {
                 <NumberStatus status={official && n.status === 'connected' ? 'connected_api' : n.status} />
               </div>
               <div className="faint" style={{ fontSize: 12 }}>{n.demo ? '示範號碼' : channel.title}</div>
+              {n.channel === 'instagram' && !n.demo && <TokenStatus ids={n.ids} />}
               <div className="stats">
                 <div><b>{n.conversations}</b>對話</div>
               </div>
@@ -153,6 +154,22 @@ export default function Numbers() {
   )
 }
 
+/** Which Instagram credential the account uses, and when it runs out (Facebook route only). */
+function TokenStatus({ ids }: { ids: WaNumber['ids'] }) {
+  if (ids.host !== 'facebook') return <div className="faint" style={{ fontSize: 12 }}>憑證：Instagram 登入（IGAA）· 每星期自動續期</div>
+  const via = ids.pageId ? '經 Facebook 專頁' : '直接用 Instagram 帳戶'
+  if (ids.expiresAt === undefined) return <div className="faint" style={{ fontSize: 12 }}>憑證：Facebook 平台（EAA）· {via} · 到期日未知</div>
+  if (ids.expiresAt === 0) return <div className="faint" style={{ fontSize: 12 }}>憑證：Facebook 平台（EAA）· {via} · 永不過期</div>
+  const days = Math.floor((ids.expiresAt * 1000 - Date.now()) / 86400000)
+  const d = new Date(ids.expiresAt * 1000)
+  const date = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`
+  return (
+    <div style={{ fontSize: 12, color: days <= 7 ? 'var(--coral)' : undefined }} className={days <= 7 ? '' : 'faint'}>
+      憑證：Facebook 平台（EAA）· {via} · {days < 0 ? `已於 ${date} 過期，請重新連接` : `${date} 到期（剩 ${days} 日）`}
+    </div>
+  )
+}
+
 const WEBHOOK_FIELDS: Partial<Record<Channel, string>> = {
   wa_cloud: 'messages',
   instagram: 'messages, comments',
@@ -161,7 +178,7 @@ const WEBHOOK_FIELDS: Partial<Record<Channel, string>> = {
 
 function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: number, channel: Channel, warning?: string) => void }) {
   const [channel, setChannel] = useState<Channel | null>(null)
-  const [form, setForm] = useState({ label: '', phoneNumberId: '', pageId: '', accessToken: '' })
+  const [form, setForm] = useState({ label: '', phoneNumberId: '', pageId: '', igUserId: '', accessToken: '' })
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const webhookUrl = `${window.location.origin}/webhooks/meta`
@@ -173,6 +190,7 @@ function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id:
       const body = channel === 'wa_web' ? { channel, label: form.label }
         : channel === 'wa_cloud' ? { channel, label: form.label, phoneNumberId: form.phoneNumberId, accessToken: form.accessToken }
         : channel === 'messenger' ? { channel, label: form.label, pageId: form.pageId, accessToken: form.accessToken }
+        : channel === 'instagram' ? { channel, label: form.label, accessToken: form.accessToken, ...(form.igUserId ? { igUserId: form.igUserId } : {}) }
         : { channel, label: form.label, accessToken: form.accessToken }
       const { id, warning } = await api<{ id: number; warning?: string }>('/numbers', { body })
       onCreated(id, channel, warning)
@@ -225,7 +243,23 @@ function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id:
           {token('永久存取權杖（System User access token）')}
         </>
       )}
-      {channel === 'instagram' && token('Instagram 存取權杖（Instagram API with Instagram Login）')}
+      {channel === 'instagram' && (
+        <>
+          {token('Instagram 存取權杖（IGAA 開頭：Instagram 登入；EAA 開頭：Facebook 平台／系統用戶）')}
+          {form.accessToken.startsWith('EAA') && (
+            <>
+              <div>
+                <label className="label" htmlFor="num-ig">Instagram 用戶 ID（可選）</label>
+                <input id="num-ig" className="input num" inputMode="numeric" placeholder="通常會自動搵到；搵唔到先填，例如 1784…"
+                  value={form.igUserId} onChange={(e) => setForm({ ...form, igUserId: e.target.value.trim() })} />
+              </div>
+              <div className="demo-hint">
+                Facebook 平台憑證會經 graph.facebook.com 連接。系統用戶憑證唔會過期；一般用戶憑證約 60 日到期，到期日會顯示喺帳戶卡上。
+              </div>
+            </>
+          )}
+        </>
+      )}
       {channel === 'messenger' && (
         <>
           <div>

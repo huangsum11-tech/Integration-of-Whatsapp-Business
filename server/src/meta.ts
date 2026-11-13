@@ -18,12 +18,37 @@ const FB = `https://graph.facebook.com/${VERSION}`
 const IG = `https://graph.instagram.com/${VERSION}`
 
 export interface CloudConfig { phoneNumberId: string; accessToken: string }
-export interface InstagramConfig { igUserId: string; accessToken: string; username?: string }
+/**
+ * Instagram has two routes. 'instagram' (default, older configs): an IGAA token from
+ * Instagram Login, used on graph.instagram.com and refreshed with ig_refresh_token.
+ * 'facebook': an EAA token from the Facebook platform (user, Page or system-user token),
+ * used on graph.facebook.com; when the account's Facebook Page is known, messages go
+ * through the Page with the Page token.
+ */
+export type InstagramHost = 'instagram' | 'facebook'
+export interface InstagramConfig {
+  igUserId: string; accessToken: string; username?: string
+  host?: InstagramHost; pageId?: string
+  /** Facebook route: unix seconds when the stored token expires; 0 = never; absent = unknown. */
+  expiresAt?: number; tokenType?: string
+}
 export interface MessengerConfig { pageId: string; accessToken: string; name?: string }
 
 export function numberConfig<T>(numberId: number): T {
   const row = get<{ config: string }>('SELECT config FROM numbers WHERE id = ?', numberId)
   return JSON.parse(row?.config || '{}') as T
+}
+
+/** Which Graph host an Instagram token belongs to: EAA… tokens are Facebook-platform tokens. */
+export function instagramHostFor(token: string): InstagramHost {
+  return token.trim().startsWith('EAA') ? 'facebook' : 'instagram'
+}
+function igBase(config: Pick<InstagramConfig, 'host'>) {
+  return config.host === 'facebook' ? FB : IG
+}
+/** The account that sends Instagram messages: the Page on the Facebook route when known. */
+function igSender(config: InstagramConfig) {
+  return config.host === 'facebook' && config.pageId ? config.pageId : config.igUserId
 }
 
 async function graph<T>(url: string, token: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
@@ -48,11 +73,62 @@ export async function verifyCloud(config: CloudConfig) {
 }
 
 /** Check an Instagram access token and return the professional account it belongs to. */
-export async function verifyInstagram(accessToken: string) {
+export async function verifyInstagram(accessToken: string, igUserId?: string): Promise<Omit<InstagramConfig, 'accessToken'> & { accessToken: string }> {
+  if (instagramHostFor(accessToken) === 'facebook') return verifyInstagramFacebook(accessToken.trim(), igUserId?.trim() || undefined)
   const me = await graph<{ user_id?: string; id?: string; username?: string }>(`${IG}/me?fields=user_id,username`, accessToken)
-  const igUserId = me.user_id ?? me.id
-  if (!igUserId) throw new Error('未能讀取 Instagram 帳戶')
-  return { igUserId: String(igUserId), username: me.username ?? '' }
+  const id = me.user_id ?? me.id
+  if (!id) throw new Error('未能讀取 Instagram 帳戶')
+  return { igUserId: String(id), username: me.username ?? '', accessToken, host: 'instagram' }
+}
+
+type IgAccount = { id?: string; username?: string }
+type PageRow = { id?: string; name?: string; access_token?: string; instagram_business_account?: IgAccount }
+
+/**
+ * Facebook-platform (EAA) token. Works with a user or system-user token that manages the
+ * account's Page (the Page and its Page token are looked up), a Page token, or a token
+ * scoped to the Instagram account itself (then the Instagram user ID is needed).
+ */
+async function verifyInstagramFacebook(token: string, wantedId?: string) {
+  // 1. User / system-user token: find the Page linked to the Instagram account.
+  const pages = await graph<{ data?: PageRow[] }>(
+    `${FB}/me/accounts?fields=id,name,access_token,instagram_business_account{id,username}&limit=100`, token,
+  ).then((r) => r.data ?? []).catch(() => [] as PageRow[])
+  const linked = pages.filter((p) => p.instagram_business_account?.id && (!wantedId || p.instagram_business_account.id === wantedId))
+  if (linked.length > 1) throw new Error('呢個憑證管理多個 Instagram 帳戶，請填「Instagram 用戶 ID」')
+  let found: { igUserId: string; username: string; pageId?: string; accessToken: string } | undefined
+  if (linked.length === 1) {
+    const p = linked[0]
+    found = { igUserId: String(p.instagram_business_account!.id), username: p.instagram_business_account!.username ?? '', pageId: p.id, accessToken: p.access_token || token }
+  }
+  // 2. Page token: the Page itself carries the Instagram account.
+  if (!found) {
+    const me = await graph<PageRow>(`${FB}/me?fields=id,name,instagram_business_account{id,username}`, token).catch(() => null)
+    const ig = me?.instagram_business_account
+    if (ig?.id && (!wantedId || ig.id === wantedId)) found = { igUserId: String(ig.id), username: ig.username ?? '', pageId: me?.id, accessToken: token }
+  }
+  // 3. Token scoped to the Instagram account: read it by ID.
+  if (!found && wantedId) {
+    const acc = await graph<IgAccount>(`${FB}/${encodeURIComponent(wantedId)}?fields=id,username`, token)
+    if (acc.id) found = { igUserId: String(acc.id), username: acc.username ?? '', accessToken: token }
+  }
+  if (!found) {
+    throw new Error(wantedId ? '用呢個 Facebook 憑證讀唔到呢個 Instagram 帳戶' : '用呢個 Facebook 憑證搵唔到 Instagram 帳戶，請填「Instagram 用戶 ID」再試')
+  }
+  return { ...found, host: 'facebook' as const, ...(await tokenExpiry(found.accessToken)) }
+}
+
+/** Best effort: when the token expires (0 = never) and its type. Unknown when Meta won't say. */
+async function tokenExpiry(token: string): Promise<{ expiresAt?: number; tokenType?: string }> {
+  try {
+    const r = await graph<{ data?: { expires_at?: number; data_access_expires_at?: number; type?: string; is_valid?: boolean } }>(
+      `${FB}/debug_token?input_token=${encodeURIComponent(token)}`, token,
+    )
+    if (!r.data || r.data.is_valid === false) return {}
+    return { expiresAt: Number(r.data.expires_at ?? 0), tokenType: r.data.type }
+  } catch {
+    return {}
+  }
 }
 
 /** Check a Facebook Page access token and return the Page's name. */
@@ -72,9 +148,18 @@ export async function subscribeWebhooks(channel: string, config: Record<string, 
       method: 'POST', body: { subscribed_fields: 'messages,message_echoes,messaging_postbacks,feed' },
     })
   } else if (channel === 'instagram') {
-    await graph(`${IG}/${encodeURIComponent(config.igUserId)}/subscribed_apps`, config.accessToken, {
-      method: 'POST', body: { subscribed_fields: 'messages,comments' },
-    })
+    const ig = config as unknown as InstagramConfig
+    try {
+      await graph(`${igBase(ig)}/${encodeURIComponent(ig.igUserId)}/subscribed_apps`, ig.accessToken, {
+        method: 'POST', body: { subscribed_fields: 'messages,comments' },
+      })
+    } catch (err) {
+      // Facebook route: Instagram events can also be subscribed through the linked Page.
+      if (ig.host !== 'facebook' || !ig.pageId) throw err
+      await graph(`${FB}/${encodeURIComponent(ig.pageId)}/subscribed_apps`, ig.accessToken, {
+        method: 'POST', body: { subscribed_fields: 'messages,feed' },
+      })
+    }
   }
 }
 
@@ -197,7 +282,7 @@ export async function sendCloudTemplate(numberId: number, phone: string, templat
 export async function sendInstagramText(numberId: number, conversationId: number, jid: string, text: string) {
   assertServiceWindow(conversationId)
   const config = numberConfig<InstagramConfig>(numberId)
-  const data = await graph<{ message_id?: string }>(`${IG}/${encodeURIComponent(config.igUserId)}/messages`, config.accessToken, {
+  const data = await graph<{ message_id?: string }>(`${igBase(config)}/${encodeURIComponent(igSender(config))}/messages`, config.accessToken, {
     method: 'POST',
     body: { recipient: { id: jid.split('@')[0] }, message: { text } },
   })
@@ -211,7 +296,7 @@ export async function sendInstagramText(numberId: number, conversationId: number
  */
 export async function sendInstagramPrivateReply(numberId: number, commentId: string, text: string) {
   const config = numberConfig<InstagramConfig>(numberId)
-  return graph<{ recipient_id?: string; message_id?: string }>(`${IG}/${encodeURIComponent(config.igUserId)}/messages`, config.accessToken, {
+  return graph<{ recipient_id?: string; message_id?: string }>(`${igBase(config)}/${encodeURIComponent(igSender(config))}/messages`, config.accessToken, {
     method: 'POST',
     body: { recipient: { comment_id: commentId }, message: { text } },
   })
@@ -234,7 +319,7 @@ export async function replyToFacebookComment(numberId: number, commentId: string
 /** A public answer under the comment, e.g. "已私訊你 😊". */
 export async function replyToInstagramComment(numberId: number, commentId: string, text: string) {
   const config = numberConfig<InstagramConfig>(numberId)
-  return graph(`${IG}/${encodeURIComponent(commentId)}/replies`, config.accessToken, { method: 'POST', body: { message: text } })
+  return graph(`${igBase(config)}/${encodeURIComponent(commentId)}/replies`, config.accessToken, { method: 'POST', body: { message: text } })
 }
 
 // ---------- Webhook ----------
@@ -427,9 +512,9 @@ async function fillName(channel: 'instagram' | 'messenger', numberId: number, id
   const contact = get<{ id: number; wa_name: string | null }>('SELECT id, wa_name FROM contacts WHERE phone = ?', `${channel === 'instagram' ? 'ig' : 'fb'}:${id}`)
   // Look up once, and again if we only know the "@username" (e.g. from a comment).
   if (!contact || (contact.wa_name && !contact.wa_name.startsWith('@'))) return
-  const { accessToken } = numberConfig<{ accessToken: string }>(numberId)
+  const { accessToken, host } = numberConfig<{ accessToken: string; host?: InstagramHost }>(numberId)
   const profile = channel === 'instagram'
-    ? await graph<{ name?: string; username?: string }>(`${IG}/${encodeURIComponent(id)}?fields=name,username`, accessToken)
+    ? await graph<{ name?: string; username?: string }>(`${igBase({ host })}/${encodeURIComponent(id)}?fields=name,username`, accessToken)
     : await graph<{ name?: string; username?: string }>(`${FB}/${encodeURIComponent(id)}?fields=name`, accessToken)
   const name = profile.name && profile.username ? `${profile.name} (@${profile.username})` : profile.name ?? (profile.username && `@${profile.username}`)
   if (!name) return
