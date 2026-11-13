@@ -12,7 +12,8 @@ import { all, get, getSetting, run } from './db.js'
 import { addEvent, getConversation, inboxEvents, previewOf, type MessageType } from './inbox.js'
 import { broadcast } from './realtime.js'
 import { canTranscribe } from './transcribe.js'
-import { handleFlows, type FlowReply } from './flows.js'
+import { activeFlow, endFlow, handleFlows, type FlowReply } from './flows.js'
+import { HUMAN_BUTTON } from './meta.js'
 import { brandOfConversation } from './brands.js'
 import { sendImage } from './channels.js'
 
@@ -25,14 +26,64 @@ const MAX_AUTO_PER_HOUR = 15
 
 const timers = new Map<number, NodeJS.Timeout>()
 
+/** Sent when the customer asks for a person and no handoff message is set. */
+const DEFAULT_HANDOFF = '收到！我已經通知同事，佢哋會盡快回覆你 🙏'
+
+/**
+ * The customer tapped 「同真人講」 or typed exactly those four characters. A sentence that only
+ * contains them ("我唔想同真人講") is an ordinary message for the AI.
+ */
+export function isHumanRequest(text: string) {
+  return text.replace(/\s+/g, '').replace(/[!！。.~～?？]+$/u, '') === HUMAN_BUTTON.title
+}
+
+/**
+ * Hand the conversation to the team at the customer's request: same state as the AI's own
+ * handoff, any guided flow stops, and the customer is told once (without the button). A request
+ * while the conversation is already waiting for a person changes nothing.
+ */
+export async function requestHuman(conversationId: number) {
+  const c = get<{ ai_paused: number; needs_human: number; number_id: number }>(
+    'SELECT ai_paused, needs_human, number_id FROM conversations WHERE id = ?', conversationId,
+  )
+  if (!c || (c.ai_paused && c.needs_human)) return false
+  clearTimeout(timers.get(conversationId))
+  timers.delete(conversationId)
+  const flow = activeFlow(conversationId)
+  if (flow) endFlow(flow.id, 'aborted', '客人要求同真人講')
+  run('UPDATE conversations SET needs_human = 1, ai_paused = 1, ai_suggestion = NULL WHERE id = ?', conversationId)
+  addEvent(conversationId, null, 'ai_handoff', '客人要求同真人講')
+  broadcast('conversation', getConversation(conversationId))
+  // Only a number that answers on its own speaks to the customer; in 'suggest' mode the team replies.
+  if (replyMode(c.number_id) === 'auto') {
+    await sendReply(conversationId, getSetting('handoff_message').trim() || DEFAULT_HANDOFF, { userId: null, aiAuto: true })
+  }
+  return true
+}
+
+/** The 「同真人講」 button is only on WhatsApp Cloud API numbers, so only they take the request. */
+function takesHumanRequest(numberId: number, messageId: number) {
+  const n = get<{ channel: string }>('SELECT channel FROM numbers WHERE id = ?', numberId)
+  if (n?.channel !== 'wa_cloud') return false
+  const m = get<{ type: string; body: string }>('SELECT type, body FROM messages WHERE id = ?', messageId)
+  return m?.type === 'text' && isHumanRequest(m.body)
+}
+
 interface MessageEvent { conversationId: number; numberId: number; messageId: number }
 
 function replyMode(numberId: number): ReplyMode {
   return (get<{ reply_mode: ReplyMode }>('SELECT reply_mode FROM numbers WHERE id = ?', numberId)?.reply_mode ?? 'off')
 }
 
-inboxEvents.on('customer-message', ({ conversationId, numberId }: MessageEvent) => {
+inboxEvents.on('customer-message', ({ conversationId, numberId, messageId }: MessageEvent) => {
   if (replyMode(numberId) === 'off') return
+  if (takesHumanRequest(numberId, messageId)) {
+    requestHuman(conversationId).catch((err) => {
+      console.error('Handoff request failed', err)
+      addEvent(conversationId, null, 'ai_error', err instanceof Error ? err.message : '轉交訊息發送失敗')
+    })
+    return
+  }
   clearTimeout(timers.get(conversationId))
   timers.set(conversationId, setTimeout(() => {
     timers.delete(conversationId)
@@ -118,7 +169,8 @@ async function respond(conversationId: number) {
       reply.action === 'reply' ? reply.text : null, reply.action === 'handoff' ? 1 : 0, conversationId)
     if (reply.action === 'handoff') addEvent(conversationId, null, 'ai_handoff', reply.reason)
   } else if (reply.action === 'reply') {
-    await sendReply(conversationId, reply.text, { userId: null, aiAuto: true })
+    // FAQ answers and AI-written replies offer 「同真人講」; guided flow steps don't.
+    await sendReply(conversationId, reply.text, { userId: null, aiAuto: true, humanButton: !flowReply })
     for (const image of reply.images ?? []) {
       await sendImage(conversationId, image, '', { userId: null, aiAuto: true }).catch((err) => console.warn('Image not sent', err))
     }

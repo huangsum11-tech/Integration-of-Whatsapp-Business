@@ -172,6 +172,8 @@ if (!columns('users').includes('phone')) db.exec("ALTER TABLE users ADD COLUMN p
 if (!columns('messages').includes('transcript')) db.exec('ALTER TABLE messages ADD COLUMN transcript TEXT')
 // Sent by the AI on its own, with no teammate reviewing it.
 if (!columns('messages').includes('ai_auto')) db.exec('ALTER TABLE messages ADD COLUMN ai_auto INTEGER NOT NULL DEFAULT 0')
+// Reply buttons sent with a message (JSON array of titles), e.g. ["同真人講"].
+if (!columns('messages').includes('buttons')) db.exec('ALTER TABLE messages ADD COLUMN buttons TEXT')
 db.exec(`
 -- What the AI is allowed to say: FAQ answers, company policies, class information.
 CREATE TABLE IF NOT EXISTS knowledge (

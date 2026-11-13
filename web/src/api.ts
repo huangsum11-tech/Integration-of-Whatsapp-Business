@@ -52,6 +52,8 @@ export interface Message {
   ai_auto: number
   /** Text of a voice message. */
   transcript: string | null
+  /** Reply buttons sent with the message (JSON array of titles), e.g. 「同真人講」. */
+  buttons: string | null
 }
 
 export interface InboxEvent {

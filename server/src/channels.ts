@@ -3,7 +3,7 @@ import { get, run } from './db.js'
 import { getConversation, storeMessage } from './inbox.js'
 import fs from 'node:fs'
 import path from 'node:path'
-import { sendCloudImage, sendCloudTemplate, sendCloudText, sendInstagramText, sendMessengerText, type TemplateMessage } from './meta.js'
+import { BUTTON_BODY_MAX, HUMAN_BUTTON, sendCloudButtons, sendCloudImage, sendCloudTemplate, sendCloudText, sendInstagramText, sendMessengerText, type TemplateMessage } from './meta.js'
 import { sendThreadsReply } from './threads.js'
 import { MEDIA_DIR, isConnected, sendImageFile, sendText } from './whatsapp.js'
 
@@ -30,6 +30,8 @@ export interface SendOptions {
   userId: number | null
   aiAssisted?: boolean
   aiAuto?: boolean
+  /** Add the 「同真人講」 button. Only the AI's own replies ask for it, and only WhatsApp Cloud API numbers can show it. */
+  humanButton?: boolean
 }
 
 export async function sendReply(conversationId: number, text: string, opts: SendOptions) {
@@ -43,19 +45,24 @@ export async function sendReply(conversationId: number, text: string, opts: Send
     ts: Math.floor(Date.now() / 1000), live: true,
   }
   const contact = contactFor(conversation.jid, conversation.phone)
+  // A message too long for a button message goes out as plain text instead.
+  const buttons = opts.humanButton && number.channel === 'wa_cloud' && text.length <= BUTTON_BODY_MAX ? [HUMAN_BUTTON] : null
+  const titles = buttons?.map((b) => b.title) ?? null
 
   if (number.demo) {
-    storeMessage({ ...message, contact, waId: `demo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })
+    storeMessage({ ...message, buttons: titles, contact, waId: `demo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })
   } else if (number.channel === 'wa_web') {
     await sendText(conversation.number_id, conversation.jid, text, opts.userId, message.aiAssisted, message.aiAuto)
   } else {
     const waId = number.channel === 'threads'
       ? await sendThreadsReply(conversation.number_id, conversationId, text)
+      : buttons
+      ? await sendCloudButtons(conversation.number_id, conversationId, conversation.jid, text, buttons)
       : await ({ wa_cloud: sendCloudText, instagram: sendInstagramText, messenger: sendMessengerText } as const)[number.channel](
         conversation.number_id, conversationId, conversation.jid, text,
       )
     // Instagram may deliver the echo of this message before we get here; credit the sender either way.
-    if (!storeMessage({ ...message, contact, waId })) {
+    if (!storeMessage({ ...message, buttons: titles, contact, waId })) {
       run('UPDATE messages SET sender_id = ?, ai_assisted = ?, ai_auto = ? WHERE conversation_id = ? AND wa_id = ?',
         opts.userId, message.aiAssisted || message.aiAuto ? 1 : 0, message.aiAuto ? 1 : 0, conversationId, waId)
     }

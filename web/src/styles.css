@@ -196,6 +196,9 @@ h1, h2, h3 { font-family: var(--font-display); margin: 0; letter-spacing: -0.01e
 .in .bubble { background: var(--surface); border-top-left-radius: 4px; }
 .out .bubble { background: #dcf1e7; border-top-right-radius: 4px; }
 .out .bubble.ai { background: #e3e8fb; }
+/* Quick-reply buttons the customer saw under the message, drawn like WhatsApp's. */
+.bubble-buttons { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; width: 100%; min-width: 180px; }
+.bubble-button { display: block; text-align: center; padding: 6px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); color: var(--pine-600); font-size: 13px; font-weight: 500; }
 .bubble-meta { font-size: 11px; color: var(--faint); margin-top: 2px; display: flex; gap: 6px; align-items: center; padding: 0 4px; }
 .bubble img, .bubble video { max-width: 260px; max-height: 300px; border-radius: 10px; display: block; margin-bottom: 4px; }
 .bubble audio { width: 240px; display: block; }

@@ -103,6 +103,35 @@ export async function sendCloudText(numberId: number, conversationId: number, ji
   return id
 }
 
+/** The quick-reply button on the AI's WhatsApp replies that hands the chat to a person. */
+export const HUMAN_BUTTON = { id: 'baton_human', title: '同真人講' } as const
+/** WhatsApp's limit for the body of a message with reply buttons. */
+export const BUTTON_BODY_MAX = 1024
+
+/** Request body for a text message with quick-reply buttons (WhatsApp allows up to 3, titles up to 20 characters). */
+export function cloudButtonPayload(to: string, text: string, buttons: readonly { id: string; title: string }[]) {
+  return {
+    messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text },
+      action: { buttons: buttons.map((b) => ({ type: 'reply', reply: { id: b.id, title: b.title } })) },
+    },
+  }
+}
+
+/** A reply with quick-reply buttons, within the 24-hour window like any free-form reply. */
+export async function sendCloudButtons(numberId: number, conversationId: number, jid: string, text: string, buttons: readonly { id: string; title: string }[]) {
+  assertServiceWindow(conversationId)
+  const config = numberConfig<CloudConfig>(numberId)
+  const data = await graph<{ messages?: { id: string }[] }>(`${FB}/${encodeURIComponent(config.phoneNumberId)}/messages`, config.accessToken, {
+    method: 'POST', body: cloudButtonPayload(jid.split('@')[0], text, buttons),
+  })
+  const id = data.messages?.[0]?.id
+  if (!id) throw new Error('發送失敗')
+  return id
+}
+
 /** Upload an image to WhatsApp and send it (within the 24-hour window). */
 export async function sendCloudImage(numberId: number, conversationId: number, jid: string, file: string, caption: string) {
   assertServiceWindow(conversationId)
@@ -240,7 +269,7 @@ type CloudMessage = {
   location?: { name?: string; address?: string; latitude: number; longitude: number }
   contacts?: { name?: { formatted_name?: string } }[]
   button?: { text?: string }
-  interactive?: { button_reply?: { title?: string }; list_reply?: { title?: string } }
+  interactive?: { button_reply?: { id?: string; title?: string }; list_reply?: { title?: string } }
 }
 
 function describeCloud(m: CloudMessage): { type: MessageType; body: string; mediaId?: string } | null {
@@ -257,7 +286,10 @@ function describeCloud(m: CloudMessage): { type: MessageType; body: string; medi
     }
     case 'contacts': return { type: 'contact', body: m.contacts?.[0]?.name?.formatted_name ?? '' }
     case 'button': return { type: 'text', body: m.button?.text ?? '' }
-    case 'interactive': return { type: 'text', body: m.interactive?.button_reply?.title ?? m.interactive?.list_reply?.title ?? '' }
+    case 'interactive':
+      // Recognise our own button by its id, so the request goes through even if the title is ever reworded.
+      if (m.interactive?.button_reply?.id === HUMAN_BUTTON.id) return { type: 'text', body: HUMAN_BUTTON.title }
+      return { type: 'text', body: m.interactive?.button_reply?.title ?? m.interactive?.list_reply?.title ?? '' }
     case 'reaction': return null
     default: return { type: 'other', body: '' }
   }

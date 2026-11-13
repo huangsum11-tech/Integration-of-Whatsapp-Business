@@ -366,6 +366,8 @@ function Bubble({ m }: { m: Message }) {
     return null
   })()
   const showBody = m.body && !['document', 'location', 'contact'].includes(m.type)
+  // What the customer saw under the message, e.g. the 「同真人講」 button.
+  const buttons: string[] = (() => { try { return m.buttons ? JSON.parse(m.buttons) : [] } catch { return [] } })()
   const transcript = m.transcript ? <div className="transcript"><Icon name="note" size={12} />{m.transcript}</div> : null
   return (
     <div className={`bubble-row ${m.from_me ? 'out' : 'in'}`}>
@@ -374,6 +376,11 @@ function Bubble({ m }: { m: Message }) {
         {transcript}
         {showBody && m.body}
       </div>
+      {buttons.length > 0 && (
+        <div className="bubble-buttons" aria-label="訊息附帶的按鈕">
+          {buttons.map((b) => <span key={b} className="bubble-button">{b}</span>)}
+        </div>
+      )}
       <div className="bubble-meta">
         {m.from_me ? <span>{m.ai_auto ? 'AI 助手' : m.sender_name ?? '由手機發送'}</span> : null}
         {m.ai_assisted ? <span className="chip iris" style={{ fontSize: 10, padding: '0 6px' }}><Icon name="sparkle" size={10} />{m.ai_auto ? 'AI 自動回覆' : 'AI 草擬'}</span> : null}

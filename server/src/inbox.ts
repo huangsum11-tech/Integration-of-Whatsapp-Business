@@ -30,6 +30,8 @@ export interface IncomingMessage {
   aiAssisted?: boolean
   /** Sent by the AI with no teammate reviewing it. */
   aiAuto?: boolean
+  /** Reply buttons sent with the message, by title. */
+  buttons?: string[] | null
   /** Live messages bump unread counts; history-sync backfill does not. */
   live: boolean
 }
@@ -193,10 +195,11 @@ export function storeMessage(m: IncomingMessage): { conversationId: number; mess
     const conversationId = upsertConversation(m.numberId, m.jid, contactId)
     const inserted = run(
       `INSERT OR IGNORE INTO messages
-         (conversation_id, wa_id, from_me, sender_id, type, body, media_path, media_mime, ts, ai_assisted, ai_auto)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (conversation_id, wa_id, from_me, sender_id, type, body, media_path, media_mime, ts, ai_assisted, ai_auto, buttons)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       conversationId, m.waId, m.fromMe ? 1 : 0, m.senderId ?? null, m.type, m.body,
       m.mediaPath ?? null, m.mediaMime ?? null, m.ts, m.aiAssisted || m.aiAuto ? 1 : 0, m.aiAuto ? 1 : 0,
+      m.buttons?.length ? JSON.stringify(m.buttons) : null,
     )
     if (inserted.changes === 0) return null
     const messageId = Number(inserted.lastInsertRowid)
