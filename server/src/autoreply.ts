@@ -28,6 +28,8 @@ const timers = new Map<number, NodeJS.Timeout>()
 
 /** Sent when the customer asks for a person and no handoff message is set. */
 const DEFAULT_HANDOFF = '收到！我已經通知同事，佢哋會盡快回覆你 🙏'
+/** Timeline entry when the customer asks for a person (TASK-5 spec wording). */
+export const HUMAN_REQUEST_EVENT = '客人要求真人跟進（㩒「同真人講」）'
 
 /**
  * The customer tapped 「同真人講」 or typed exactly those four characters. A sentence that only
@@ -40,19 +42,24 @@ export function isHumanRequest(text: string) {
 /**
  * Hand the conversation to the team at the customer's request: same state as the AI's own
  * handoff, any guided flow stops, and the customer is told once (without the button). A request
- * while the conversation is already waiting for a person changes nothing.
+ * while the conversation is already waiting for a person is only noted on the timeline.
  */
 export async function requestHuman(conversationId: number) {
   const c = get<{ ai_paused: number; needs_human: number; number_id: number }>(
     'SELECT ai_paused, needs_human, number_id FROM conversations WHERE id = ?', conversationId,
   )
-  if (!c || (c.ai_paused && c.needs_human)) return false
+  if (!c) return false
+  // Already waiting for a person: note the repeat for the team, but don't tell the customer again.
+  if (c.needs_human) {
+    addEvent(conversationId, null, 'ai_handoff_repeat', '已在待人工隊列，冇再發轉交訊息')
+    return false
+  }
   clearTimeout(timers.get(conversationId))
   timers.delete(conversationId)
   const flow = activeFlow(conversationId)
   if (flow) endFlow(flow.id, 'aborted', '客人要求同真人講')
   run('UPDATE conversations SET needs_human = 1, ai_paused = 1, ai_suggestion = NULL WHERE id = ?', conversationId)
-  addEvent(conversationId, null, 'ai_handoff', '客人要求同真人講')
+  addEvent(conversationId, null, 'ai_handoff', HUMAN_REQUEST_EVENT)
   broadcast('conversation', getConversation(conversationId))
   // Only a number that answers on its own speaks to the customer; in 'suggest' mode the team replies.
   if (replyMode(c.number_id) === 'auto') {

@@ -411,6 +411,7 @@ function EventLine({ e }: { e: InboxEvent }) {
     deal_won: `${who} 成交：${e.body}`,
     deal_lost: `${who} 標記失單：${e.body}`,
     ai_handoff: 'AI 轉交同事處理',
+    ai_handoff_repeat: '客人再次要求真人',
     ai_paused: e.user_id ? `${who} 暫停了 AI 自動回覆` : 'AI 自動回覆已暫停',
     ai_resumed: `${who} 恢復了 AI 自動回覆`,
     ai_error: 'AI 回覆失敗',

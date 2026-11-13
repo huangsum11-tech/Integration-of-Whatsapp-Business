@@ -113,6 +113,13 @@ test('grounding unchanged and v2 rules present in what the model is told', async
   // v2 behaviour.
   assert.match(instructions, /Never clarify the hand-off-at-once cases above\./)
   assert.match(instructions, /Ask at most once in a row\./)
+  // v2 rules added on the Mac after checking the full spec (2026-11-13).
+  assert.match(instructions, /give the number of classes and the validity period/)
+  assert.match(instructions, /Never promise a discount, free class or special arrangement/)
+  assert.match(instructions, /answer honestly in one light sentence/)
+  assert.match(instructions, /corporate partnership, a job, or a media enquiry/)
+  assert.match(instructions, /never ask for ID card numbers, bank details or passwords/)
+  assert.match(instructions, /don't ask them to repeat it/)
   assert.match(instructions, /Combine everything that is written into one answer/)
   assert.match(instructions, /never fill the gap with a guess/)
   assert.match(instructions, /spoken Cantonese/)

@@ -104,7 +104,9 @@ export async function sendCloudText(numberId: number, conversationId: number, ji
 }
 
 /** The quick-reply button on the AI's WhatsApp replies that hands the chat to a person. */
-export const HUMAN_BUTTON = { id: 'baton_human', title: '同真人講' } as const
+export const HUMAN_BUTTON = { id: 'handoff_human', title: '同真人講' } as const
+/** The id used before 2026-11-13; buttons already in customers' chats still carry it. */
+const LEGACY_HUMAN_BUTTON_IDS = new Set(['baton_human'])
 /** WhatsApp's limit for the body of a message with reply buttons. */
 export const BUTTON_BODY_MAX = 1024
 
@@ -288,7 +290,9 @@ function describeCloud(m: CloudMessage): { type: MessageType; body: string; medi
     case 'button': return { type: 'text', body: m.button?.text ?? '' }
     case 'interactive':
       // Recognise our own button by its id, so the request goes through even if the title is ever reworded.
-      if (m.interactive?.button_reply?.id === HUMAN_BUTTON.id) return { type: 'text', body: HUMAN_BUTTON.title }
+      if (m.interactive?.button_reply?.id === HUMAN_BUTTON.id || LEGACY_HUMAN_BUTTON_IDS.has(m.interactive?.button_reply?.id ?? '')) {
+        return { type: 'text', body: HUMAN_BUTTON.title }
+      }
       return { type: 'text', body: m.interactive?.button_reply?.title ?? m.interactive?.list_reply?.title ?? '' }
     case 'reaction': return null
     default: return { type: 'other', body: '' }

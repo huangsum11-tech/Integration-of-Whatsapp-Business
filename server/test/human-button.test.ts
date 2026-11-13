@@ -38,7 +38,8 @@ async function until(check: () => boolean, ms = 2000) {
 // Rows come back with a null prototype; copy them so deepEqual compares plain objects.
 const conversation = (id: number) => ({ ...db.get<{ needs_human: number; ai_paused: number }>('SELECT needs_human, ai_paused FROM conversations WHERE id = ?', id)! })
 const outgoing = (id: number) => db.all<{ body: string; buttons: string | null }>('SELECT body, buttons FROM messages WHERE conversation_id = ? AND from_me = 1 ORDER BY id', id)
-const requests = (id: number) => db.get<{ c: number }>("SELECT COUNT(*) AS c FROM events WHERE conversation_id = ? AND kind = 'ai_handoff' AND body = '客人要求同真人講'", id)!.c
+const requests = (id: number) => db.get<{ c: number }>("SELECT COUNT(*) AS c FROM events WHERE conversation_id = ? AND kind = 'ai_handoff' AND body = ?", id, autoreply.HUMAN_REQUEST_EVENT)!.c
+const repeats = (id: number) => db.get<{ c: number }>("SELECT COUNT(*) AS c FROM events WHERE conversation_id = ? AND kind = 'ai_handoff_repeat'", id)!.c
 
 /** A Cloud API webhook delivery with one message, as Meta sends it. */
 function webhook(phone: string, message: Record<string, unknown>) {
@@ -56,13 +57,13 @@ const tap = (phone: string, id: string, title = '同真人講') =>
 
 // ---------- Sending ----------
 
-test('payload: one quick-reply button 「同真人講」 with id baton_human, in WhatsApp\'s interactive shape', () => {
+test('payload: one quick-reply button 「同真人講」 with id handoff_human, in WhatsApp\'s interactive shape', () => {
   assert.deepEqual(meta.cloudButtonPayload('85291234567', '你好', [meta.HUMAN_BUTTON]), {
     messaging_product: 'whatsapp', recipient_type: 'individual', to: '85291234567', type: 'interactive',
     interactive: {
       type: 'button',
       body: { text: '你好' },
-      action: { buttons: [{ type: 'reply', reply: { id: 'baton_human', title: '同真人講' } }] },
+      action: { buttons: [{ type: 'reply', reply: { id: 'handoff_human', title: '同真人講' } }] },
     },
   })
   // WhatsApp's limits: button title up to 20 characters, id up to 256.
@@ -114,7 +115,7 @@ test('button tap: needs_human and ai_paused set, guided flow stopped, handoff me
   assert.equal(requests(id), 1)
 })
 
-test('duplicates: a second tap, the typed words, and Meta resending the same webhook change nothing', async () => {
+test('duplicates: a second tap and the typed words are only noted; Meta resending the same webhook changes nothing', async () => {
   const phone = newPhone()
   const first = say(cloud, phone, '你好')
   const id = first.conversationId
@@ -127,6 +128,7 @@ test('duplicates: a second tap, the typed words, and Meta resending the same web
   say(cloud, phone, '同真人講') // typed
   await sleep(300)
   assert.equal(requests(id), 1)
+  assert.equal(repeats(id), 2, 'the second tap and the typed words are noted, the retry is not')
   assert.equal(outgoing(id).length, sent)
   assert.equal(db.get<{ c: number }>("SELECT COUNT(*) AS c FROM messages WHERE conversation_id = ? AND wa_id = 'wamid.dup-1'", id)!.c, 1)
 })
@@ -173,4 +175,12 @@ test("'suggest' mode: the request goes to the team's queue, and nothing is sent 
   } finally {
     db.run("UPDATE numbers SET reply_mode = 'auto' WHERE id = ?", cloud)
   }
+})
+
+test('a button sent before the id changed (baton_human) still hands over', async () => {
+  const phone = newPhone()
+  const id = say(cloud, phone, '你好').conversationId
+  webhook(phone, { id: 'wamid.legacy-1', type: 'interactive', interactive: { type: 'button_reply', button_reply: { id: 'baton_human', title: 'Talk to a person' } } })
+  assert.ok(await until(() => requests(id) === 1))
+  assert.deepEqual(conversation(id), { needs_human: 1, ai_paused: 1 })
 })
