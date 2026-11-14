@@ -47,8 +47,8 @@ export default function Numbers() {
   const syncHistory = async (id: number) => {
     setHistorySyncing(id); setSyncResult('')
     try {
-      const r = await api<{ conversations: number; messages: number; skipped: number }>(`/numbers/${id}/sync-instagram-history`, { method: 'POST' })
-      setSyncResult(`歷史對話同步完成：新增 ${r.conversations} 個對話、${r.messages} 條訊息${r.skipped ? `，跳過 ${r.skipped} 條已有紀錄` : ''}。匯入的對話會標示為已完成，不會觸發自動回覆。`)
+      const r = await api<{ conversations: number; messages: number; skipped: number; listed: number; failed: number; error?: string }>(`/numbers/${id}/sync-instagram-history`, { method: 'POST' })
+      setSyncResult(`歷史對話同步完成：Meta 共列出 ${r.listed} 個對話，新增 ${r.conversations} 個對話、${r.messages} 條訊息${r.skipped ? `，跳過 ${r.skipped} 條已有紀錄` : ''}${r.failed ? `；${r.failed} 個對話讀取失敗${r.error ? `（${r.error}）` : ''}，再同步一次可補回` : ''}。匯入的對話會標示為已完成，不會觸發自動回覆。`)
       refreshNumbers()
     } catch (err) {
       setSyncResult(err instanceof Error ? err.message : '同步失敗')

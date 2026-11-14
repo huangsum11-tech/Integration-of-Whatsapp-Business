@@ -324,7 +324,15 @@ export async function replyToInstagramComment(numberId: number, commentId: strin
 
 // ---------- Instagram history sync (TASK-9) ----------
 
-export interface IgHistorySummary { conversations: number; messages: number; skipped: number }
+export interface IgHistorySummary {
+  conversations: number; messages: number; skipped: number
+  /** How many conversations Meta's list call returned this run (all pages). */
+  listed: number
+  /** Conversations whose messages could not be read; the run continued past them. */
+  failed: number
+  /** The first failure's message, present only when failed > 0. */
+  error?: string
+}
 
 type IgParticipant = { id?: string; username?: string }
 type IgAttachment = {
@@ -344,12 +352,44 @@ type GraphPage<T> = { data?: T[]; paging?: { next?: string } }
 /** Safety cap so a huge account cannot page Meta (or us) forever: 100 pages per edge. */
 const HISTORY_MAX_PAGES = 100
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+/** History-sync waits, scaled by BATON_HISTORY_DELAY_SCALE (tests set it to 0). */
+const historySleep = (ms: number) => sleep(ms * Number(process.env.BATON_HISTORY_DELAY_SCALE ?? 1))
+/** Backoff before each retry of a throttled history request: 3 retries, then give up. */
+const HISTORY_RETRY_WAITS_MS = [5_000, 20_000, 60_000]
+/** Pause between conversations, so a long sync does not burst against Meta's limits. */
+const HISTORY_CONVERSATION_GAP_MS = 250
+
+/**
+ * Meta throttling errors — "(#4) Application request limit reached", "(#17) User
+ * request limit reached", "(#32) Page request limit reached", "(#613) Calls to this
+ * api have exceeded the rate limit". graph() flattens errors to a message string,
+ * so match on the wording and the code.
+ */
+function isTransientMetaError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err)
+  return message.includes('limit reached') || /\(#(4|17|32|613)\)/.test(message)
+}
+
+/** One page of a history edge; a throttled request is retried with backoff. */
+async function graphHistoryPage<T>(url: string, token: string): Promise<GraphPage<T>> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await graph<GraphPage<T>>(url, token)
+    } catch (err) {
+      const wait = HISTORY_RETRY_WAITS_MS[attempt]
+      if (wait === undefined || !isTransientMetaError(err)) throw err
+      await historySleep(wait)
+    }
+  }
+}
+
 /** Follow paging.next through a Graph edge, up to the page cap. */
 async function graphAll<T>(firstUrl: string, token: string): Promise<T[]> {
   const out: T[] = []
   let url: string | undefined = firstUrl
   for (let page = 0; url && page < HISTORY_MAX_PAGES; page++) {
-    const r: GraphPage<T> = await graph<GraphPage<T>>(url, token)
+    const r: GraphPage<T> = await graphHistoryPage<T>(url, token)
     out.push(...(r.data ?? []))
     url = r.paging?.next
   }
@@ -376,6 +416,9 @@ function historyMessageShape(m: IgHistoryMessage): { type: MessageType; body: st
  * nothing. Everything is stored as history (live: false) — no unread badges, no AI
  * replies, no waiting alerts, and nothing is ever sent. Conversations the sync itself
  * creates are closed; conversations that already existed keep their state.
+ * Each conversation is imported in isolation: if Meta refuses one (after the throttle
+ * retries in graphAll), the run counts it in `failed`, keeps the first error message,
+ * and moves on — a re-run fills the gaps, since stored messages dedupe by Meta id.
  */
 export async function syncInstagramHistory(numberId: number): Promise<IgHistorySummary> {
   const config = numberConfig<InstagramConfig>(numberId)
@@ -384,41 +427,50 @@ export async function syncInstagramHistory(numberId: number): Promise<IgHistoryS
   const owner = config.host === 'facebook' && config.pageId ? config.pageId : config.igUserId
   const ownIds = new Set([config.igUserId, config.pageId].filter(Boolean).map(String))
   const before = new Set(all<{ id: number }>('SELECT id FROM conversations WHERE number_id = ?', numberId).map((c) => c.id))
-  const summary: IgHistorySummary = { conversations: 0, messages: 0, skipped: 0 }
+  const summary: IgHistorySummary = { conversations: 0, messages: 0, skipped: 0, listed: 0, failed: 0 }
   const fresh = new Set<number>()
 
   const conversations = await graphAll<IgConversation>(
     `${base}/${encodeURIComponent(owner)}/conversations?platform=instagram&fields=id,participants{id,username}&limit=100`,
     config.accessToken,
   )
-  for (const conv of conversations) {
+  summary.listed = conversations.length
+  for (const [index, conv] of conversations.entries()) {
+    if (index > 0) await historySleep(HISTORY_CONVERSATION_GAP_MS)
     if (!conv.id) continue
-    const participants = conv.participants?.data ?? []
-    const messages = await graphAll<IgHistoryMessage>(
-      `${base}/${encodeURIComponent(conv.id)}/messages?fields=id,created_time,from{id,username},to{id,username},message,attachments&limit=100`,
-      config.accessToken,
-    )
-    for (const m of messages) {
-      if (!m.id) { summary.skipped++; continue }
-      const fromMe = ownIds.has(String(m.from?.id ?? ''))
-      const toList: IgParticipant[] = !m.to ? []
-        : 'data' in m.to && Array.isArray(m.to.data) ? m.to.data
-          : [m.to as IgParticipant]
-      // The customer is the sender of an incoming message, a recipient of ours, or the
-      // conversation's other participant when neither names them.
-      const notUs = (p: IgParticipant) => Boolean(p.id) && !ownIds.has(String(p.id))
-      const other = fromMe ? toList.find(notUs) ?? participants.find(notUs) : m.from
-      const ts = Math.floor(Date.parse(m.created_time ?? '') / 1000)
-      if (!other?.id || !Number.isFinite(ts)) { summary.skipped++; continue }
-      const shape = historyMessageShape(m)
-      const stored = storeMessage({
-        numberId, jid: `${other.id}@instagram`, contact: { ig: String(other.id) },
-        waName: other.username ? `@${other.username}` : undefined,
-        waId: m.id, fromMe, type: shape.type, body: shape.body, mediaMime: shape.mediaMime, ts, live: false,
-      })
-      if (!stored) { summary.skipped++; continue } // Already in the DB (dedupe by Meta message id).
-      summary.messages++
-      if (!before.has(stored.conversationId)) fresh.add(stored.conversationId)
+    try {
+      const participants = conv.participants?.data ?? []
+      const messages = await graphAll<IgHistoryMessage>(
+        `${base}/${encodeURIComponent(conv.id)}/messages?fields=id,created_time,from{id,username},to{id,username},message,attachments&limit=100`,
+        config.accessToken,
+      )
+      for (const m of messages) {
+        if (!m.id) { summary.skipped++; continue }
+        const fromMe = ownIds.has(String(m.from?.id ?? ''))
+        const toList: IgParticipant[] = !m.to ? []
+          : 'data' in m.to && Array.isArray(m.to.data) ? m.to.data
+            : [m.to as IgParticipant]
+        // The customer is the sender of an incoming message, a recipient of ours, or the
+        // conversation's other participant when neither names them.
+        const notUs = (p: IgParticipant) => Boolean(p.id) && !ownIds.has(String(p.id))
+        const other = fromMe ? toList.find(notUs) ?? participants.find(notUs) : m.from
+        const ts = Math.floor(Date.parse(m.created_time ?? '') / 1000)
+        if (!other?.id || !Number.isFinite(ts)) { summary.skipped++; continue }
+        const shape = historyMessageShape(m)
+        const stored = storeMessage({
+          numberId, jid: `${other.id}@instagram`, contact: { ig: String(other.id) },
+          waName: other.username ? `@${other.username}` : undefined,
+          waId: m.id, fromMe, type: shape.type, body: shape.body, mediaMime: shape.mediaMime, ts, live: false,
+        })
+        if (!stored) { summary.skipped++; continue } // Already in the DB (dedupe by Meta message id).
+        summary.messages++
+        if (!before.has(stored.conversationId)) fresh.add(stored.conversationId)
+      }
+    } catch (err) {
+      // One bad conversation must not sink the run; messages it already stored stay
+      // stored, and a re-run picks up the rest.
+      summary.failed++
+      if (summary.error === undefined) summary.error = err instanceof Error ? err.message : String(err)
     }
   }
   for (const id of fresh) run("UPDATE conversations SET status = 'closed', unread = 0 WHERE id = ?", id)

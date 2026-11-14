@@ -9,6 +9,9 @@ import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import { setup } from './helpers.ts'
 
+// The sync paces itself and backs off when Meta throttles; tests skip those waits.
+process.env.BATON_HISTORY_DELAY_SCALE = '0'
+
 const t = await setup()
 const { db } = t
 const meta = await import('../src/meta.js')
@@ -41,6 +44,10 @@ const addNumber = (label: string, config: object) => Number(db.run(
 ).lastInsertRowid)
 const fbNumber = addNumber('IG via Facebook', { igUserId: IG_ID, pageId: PAGE_ID, accessToken: EAA_PAGE, host: 'facebook', expiresAt: 0 })
 const igNumber = addNumber('IG via Instagram Login', { igUserId: IGAA_ID, accessToken: IGAA, host: 'instagram' })
+const EAA_PAGE2 = 'EAApagetoken2abcdefghijklmnopqrstuv'
+const IG2_ID = '17841400000000002'
+const PAGE2_ID = '1000000000000002'
+const fbNumber2 = addNumber('IG via Facebook (failure tests)', { igUserId: IG2_ID, pageId: PAGE2_ID, accessToken: EAA_PAGE2, host: 'facebook', expiresAt: 0 })
 
 // ---------- Fictional Facebook-route data, paginated on both edges ----------
 
@@ -80,7 +87,7 @@ test('first sync (EAA route): imports every conversation and message, closed and
 
   mock(fbData)
   const summary = await meta.syncInstagramHistory(fbNumber)
-  assert.deepEqual(summary, { conversations: 2, messages: 4, skipped: 0 })
+  assert.deepEqual(summary, { conversations: 2, messages: 4, skipped: 0, listed: 2, failed: 0 })
   assert.deepEqual(hosts(), ['graph.facebook.com'], 'an EAA account is only read on graph.facebook.com')
   assert.ok(calls.every((c) => c.token === EAA_PAGE))
   assert.match(calls[0].url, new RegExp(`/${PAGE_ID}/conversations\\?platform=instagram`), 'the list is read through the Page')
@@ -128,7 +135,7 @@ test('first sync (EAA route): imports every conversation and message, closed and
 test('re-running the sync imports nothing new and counts the duplicates it skipped', async () => {
   mock(fbData)
   const summary = await meta.syncInstagramHistory(fbNumber)
-  assert.deepEqual(summary, { conversations: 0, messages: 0, skipped: 4 })
+  assert.deepEqual(summary, { conversations: 0, messages: 0, skipped: 4, listed: 2, failed: 0 })
   assert.equal(countMessages(fbNumber), 4)
   const conv = db.get<{ status: string }>(
     'SELECT status FROM conversations WHERE number_id = ? AND jid = ?', fbNumber, '555101@instagram',
@@ -145,7 +152,7 @@ test('IGAA route: the same sync reads graph.instagram.com by the Instagram user 
     return [400, { error: { message: `unmocked ${url}` } }]
   })
   const summary = await meta.syncInstagramHistory(igNumber)
-  assert.deepEqual(summary, { conversations: 1, messages: 1, skipped: 0 })
+  assert.deepEqual(summary, { conversations: 1, messages: 1, skipped: 0, listed: 1, failed: 0 })
   assert.deepEqual(hosts(), ['graph.instagram.com'])
   assert.match(calls[0].url, new RegExp(`/${IGAA_ID}/conversations\\?platform=instagram`))
   assert.equal(calls[0].token, IGAA)
@@ -157,4 +164,59 @@ test('IGAA route: the same sync reads graph.instagram.com by the Instagram user 
 test('a Meta error aborts the sync and surfaces Meta\'s wording', async () => {
   mock(() => [400, { error: { message: '(#100) Tried accessing nonexisting field (conversations)' } }])
   await assert.rejects(meta.syncInstagramHistory(fbNumber), /Meta API 錯誤：\(#100\) Tried accessing nonexisting field/)
+})
+
+// ---------- One bad conversation must not sink the run; throttles are retried ----------
+
+const DAN = { id: '555201', username: 'dan.train' }
+const EVE = { id: '555202', username: 'eve.yoga' }
+const FAY = { id: '555203', username: 'fay.run' }
+const GIL = { id: '555204', username: 'gil.swim' }
+const convX = { id: 'conv-x', participants: { data: [{ id: IG2_ID, username: 'fusefitnesshk' }, DAN] } }
+const convY = { id: 'conv-y', participants: { data: [{ id: IG2_ID, username: 'fusefitnesshk' }, EVE] } }
+const convZ = { id: 'conv-z', participants: { data: [{ id: IG2_ID, username: 'fusefitnesshk' }, FAY] } }
+const convW = { id: 'conv-w', participants: { data: [{ id: IG2_ID, username: 'fusefitnesshk' }, GIL] } }
+const mx1 = { id: 'mid-x1', created_time: '2026-11-07T07:00:00+0000', from: DAN, message: '星期六有冇堂？' }
+const mz1 = { id: 'mid-z1', created_time: '2026-11-06T06:00:00+0000', from: FAY, message: '想改時間' }
+const mw1 = { id: 'mid-w1', created_time: '2026-11-05T05:00:00+0000', from: GIL, message: '請問幾點開門？' }
+
+test('one unreadable conversation is skipped and reported; the rest still import', async () => {
+  mock((url) => {
+    if (url.includes(`/${PAGE2_ID}/conversations?`)) return [200, { data: [convX, convY, convZ] }]
+    if (url.includes('/conv-x/messages')) return [200, { data: [mx1] }]
+    // A non-transient Meta error, every time: no retry can fix this conversation.
+    if (url.includes('/conv-y/messages')) return [400, { error: { message: '(#100) Tried accessing nonexisting field (messages)' } }]
+    if (url.includes('/conv-z/messages')) return [200, { data: [mz1] }]
+    return [400, { error: { message: `unmocked ${url}` } }]
+  })
+  const summary = await meta.syncInstagramHistory(fbNumber2)
+  assert.equal(summary.listed, 3, 'the summary says how many conversations Meta listed')
+  assert.equal(summary.failed, 1)
+  assert.match(summary.error ?? '', /Meta API 錯誤：\(#100\)/, 'the first failure is kept for diagnosis')
+  assert.equal(summary.conversations, 2)
+  assert.equal(summary.messages, 2)
+  assert.equal(countMessages(fbNumber2), 2)
+  // The conversation listed after the broken one was still imported.
+  assert.ok(db.get('SELECT id FROM messages WHERE wa_id = ?', 'mid-z1'))
+  assert.ok(db.get('SELECT id FROM messages WHERE wa_id = ?', 'mid-x1'))
+})
+
+test('a throttled message fetch is retried with backoff and then imports', async () => {
+  let wCalls = 0
+  mock((url) => {
+    if (url.includes(`/${PAGE2_ID}/conversations?`)) return [200, { data: [convW] }]
+    if (url.includes('/conv-w/messages')) {
+      wCalls++
+      if (wCalls === 1) return [400, { error: { message: '(#4) Application request limit reached' } }]
+      return [200, { data: [mw1] }]
+    }
+    return [400, { error: { message: `unmocked ${url}` } }]
+  })
+  const summary = await meta.syncInstagramHistory(fbNumber2)
+  assert.equal(wCalls, 2, 'the throttled fetch was retried once and then went through')
+  assert.equal(summary.failed, 0)
+  assert.equal(summary.error, undefined)
+  assert.equal(summary.listed, 1)
+  assert.equal(summary.messages, 1)
+  assert.equal(countMessages(fbNumber2), 3)
 })
