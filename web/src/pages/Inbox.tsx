@@ -34,6 +34,9 @@ export default function Inbox({ conversationId }: { conversationId: number | nul
   // One inbox for every channel; the chips narrow it to one.
   const [channelFilter, setChannelFilter] = useState<'all' | 'whatsapp' | 'instagram' | 'messenger' | 'threads'>('all')
   const [conversations, setConversations] = useState<Conversation[]>([])
+  // Re-render every 30s so the 等緊 badges age even when nothing else changes.
+  const [, setNowTick] = useState(0)
+  useEffect(() => { const t = setInterval(() => setNowTick((x) => x + 1), 30_000); return () => clearInterval(t) }, [])
   const [counts, setCounts] = useState<Record<View, number>>({ human: 0, all: 0, mine: 0, unassigned: 0, closed: 0 })
   const [detail, setDetail] = useState<Detail | null>(null)
   const { numbers } = useApp()
@@ -134,6 +137,7 @@ export default function Inbox({ conversationId }: { conversationId: number | nul
           {shown.length === 0 && <div className="empty" style={{ height: 200 }}>這裏暫時沒有對話</div>}
           {shown.map((c) => {
             const assignee = c.assignee_id ? userById.get(c.assignee_id) : undefined
+            const waitMins = c.waiting_since ? Math.floor((Date.now() / 1000 - c.waiting_since) / 60) : 0
             return (
               <button key={c.id} className={`conv ${c.id === conversationId ? 'active' : ''} ${c.unread ? 'unread' : ''}`}
                 onClick={() => { window.location.hash = `#/inbox/${c.id}` }}>
@@ -157,6 +161,7 @@ export default function Inbox({ conversationId }: { conversationId: number | nul
                 </div>
                 <div className="meta">
                   {c.last_message_at ? timeLabel(c.last_message_at) : ''}
+                  {waitMins >= 5 && <span className={`wait-badge ${waitMins >= 10 ? 'hot' : 'warm'}`}>等緊 {waitMins} 分鐘</span>}
                   {c.unread > 0 && <span className="badge">{c.unread}</span>}
                 </div>
               </button>
@@ -744,8 +749,10 @@ function ResolveNumber({ numberId, onDone }: { numberId: number; onDone: () => v
   const run = async () => {
     setBusy(true); setMsg('')
     try {
-      const r = await api<{ resolved: number; unresolved: number }>(`/numbers/${numberId}/sync-contacts`, { method: 'POST' })
-      setMsg(r.resolved ? `已補回 ${r.resolved} 個電話號碼` : '暫時未能對應，客人下次傳訊息時會再嘗試')
+      const r = await api<{ resolved: number; unresolved: number; namesUpdated: number; savedTotal: number }>(`/numbers/${numberId}/sync-contacts`, { method: 'POST' })
+      setMsg(r.namesUpdated > 0
+        ? `已同步電話簿名稱：更新咗 ${r.namesUpdated} 個客人名稱（累計 ${r.savedTotal} 個已對齊），補回 ${r.resolved} 個電話號碼。`
+        : `已同步電話簿名稱：冇新名稱要更新（累計 ${r.savedTotal} 個已對齊），補回 ${r.resolved} 個電話號碼。`)
       onDone()
     } catch (err) { setMsg(err instanceof Error ? err.message : '同步失敗') }
     finally { setBusy(false) }

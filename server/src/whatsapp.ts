@@ -185,6 +185,40 @@ export async function syncContacts(numberId: number, sock = sockets.get(numberId
   return { resolved: unresolved.length - left, unresolved: left }
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+/** Sync waits, scaled by BATON_HISTORY_DELAY_SCALE (tests set it to 0) — same pattern as meta.ts. */
+const syncSleep = (ms: number) => sleep(ms * Number(process.env.BATON_HISTORY_DELAY_SCALE ?? 1))
+
+/**
+ * Contact events keep landing after a sync resolves (app-state chunks stream in), so a
+ * caller that wants to report how many saved names changed must wait for the counter to
+ * go quiet: poll until it has not moved for quietMs, with a hard cap.
+ */
+export async function waitForSavedNamesToSettle(
+  count: () => number,
+  opts: { pollMs?: number; quietMs?: number; capMs?: number } = {},
+) {
+  const pollMs = opts.pollMs ?? 400
+  const quietMs = opts.quietMs ?? 1600
+  const capMs = opts.capMs ?? 8000
+  const scale = Number(process.env.BATON_HISTORY_DELAY_SCALE ?? 1)
+  let last = count()
+  let quietFor = 0
+  let waited = 0
+  while (waited < capMs * scale) {
+    await syncSleep(pollMs)
+    waited += pollMs
+    const now = count()
+    if (now === last) {
+      quietFor += pollMs
+      if (quietFor >= quietMs) break
+    } else {
+      last = now
+      quietFor = 0
+    }
+  }
+}
+
 /** LIDs seen without a phone number, looked up together a few seconds later. */
 const toResolve = new Map<number, Set<string>>()
 let resolveTimer: NodeJS.Timeout | undefined

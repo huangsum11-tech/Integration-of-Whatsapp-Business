@@ -33,6 +33,8 @@ export interface Conversation {
   ai_suggestion: string | null
   /** 1 while the AI has handed the conversation to the team and nobody has replied yet. */
   needs_human: number
+  /** Unix seconds of the customer's last message while the chat waits on a human; null when not waiting. */
+  waiting_since: number | null
 }
 
 export type Channel = 'wa_web' | 'wa_cloud' | 'instagram' | 'messenger' | 'threads'
@@ -78,6 +80,10 @@ export interface Deal {
 export interface WaNumber {
   id: number; label: string; phone: string | null; status: string; demo: number
   conversations: number; qr: string | null; channel: Channel; reply_mode: ReplyMode
+  /** Unix seconds of the last contact sync (wa_web links); null if never synced. */
+  contacts_synced_at?: number | null
+  /** Global count of contacts carrying a phonebook saved name; shown on contacts-only sync cards. */
+  saved_contacts?: number
   /** The brand whose prices, links and payment details this number uses. */
   brand_id: number | null
   /** Official API IDs (never the access token). contactsOnly marks a QR link kept purely for saved-name sync. */

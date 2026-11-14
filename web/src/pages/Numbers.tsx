@@ -14,6 +14,12 @@ const CHANNELS: { id: Channel; icon: IconName; title: string; text: string }[] =
 ]
 const CHANNEL_ICON: Record<Channel, IconName> = { wa_web: 'phone', wa_cloud: 'phone', instagram: 'instagram', messenger: 'facebook', threads: 'threads' }
 
+/** "12 分鐘前" style label for a unix-seconds timestamp (mirrors the server's ago()). */
+function agoLabel(ts: number) {
+  const m = Math.max(0, Math.round((Date.now() / 1000 - ts) / 60))
+  return m < 1 ? '剛剛' : m < 60 ? `${m} 分鐘前` : m < 1440 ? `${Math.round(m / 60)} 小時前` : `${Math.round(m / 1440)} 日前`
+}
+
 const MODES: { id: ReplyMode; label: string; hint: string }[] = [
   { id: 'off', label: '關閉', hint: '同事手動回覆，可隨時按「AI 草擬」' },
   { id: 'suggest', label: 'AI 建議', hint: 'AI 預先寫好回覆，同事確認後一按發送' },
@@ -33,10 +39,13 @@ export default function Numbers() {
   const syncContacts = async (id: number) => {
     setSyncing(id); setSyncResult('')
     try {
-      const r = await api<{ resolved: number; unresolved: number }>(`/numbers/${id}/sync-contacts`, { method: 'POST' })
+      const r = await api<{ resolved: number; unresolved: number; namesUpdated: number; savedTotal: number }>(`/numbers/${id}/sync-contacts`, { method: 'POST' })
+      const summary = r.namesUpdated > 0
+        ? `已同步電話簿名稱：更新咗 ${r.namesUpdated} 個客人名稱（累計 ${r.savedTotal} 個已對齊），補回 ${r.resolved} 個電話號碼。`
+        : `已同步電話簿名稱：冇新名稱要更新（累計 ${r.savedTotal} 個已對齊），補回 ${r.resolved} 個電話號碼。`
       setSyncResult(r.unresolved
-        ? `已同步通訊錄名稱，補回 ${r.resolved} 個電話號碼。仍有 ${r.unresolved} 位客戶的號碼被 WhatsApp 隱藏，佢哋下次傳訊息時會自動補上。`
-        : `已同步通訊錄名稱，補回 ${r.resolved} 個電話號碼。`)
+        ? `${summary}仍有 ${r.unresolved} 位客戶的號碼被 WhatsApp 隱藏，佢哋下次傳訊息時會自動補上。`
+        : summary)
     } catch (err) {
       setSyncResult(err instanceof Error ? err.message : '同步失敗')
     } finally {
@@ -90,16 +99,22 @@ export default function Numbers() {
               <div className="top">
                 <div className="icon"><Icon name={CHANNEL_ICON[n.channel] ?? 'phone'} size={22} /></div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 15 }}>{n.label}</div>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>{n.label}{contactsOnly && <span className="chip pine" style={{ fontSize: 11, padding: '0 7px', marginLeft: 8, verticalAlign: 2 }}>名同步</span>}</div>
                   <div className="muted num" style={{ fontSize: 13 }}>{formatPhone(n.phone) || '尚未連接'}</div>
                 </div>
                 <NumberStatus status={official && n.status === 'connected' ? 'connected_api' : n.status} />
               </div>
               <div className="faint" style={{ fontSize: 12 }}>{n.demo ? '示範號碼' : contactsOnly ? '只同步聯絡人名 · 不收發訊息' : channel.title}</div>
               {n.channel === 'instagram' && !n.demo && <TokenStatus ids={n.ids} />}
-              <div className="stats">
-                <div><b>{n.conversations}</b>對話</div>
-              </div>
+              {contactsOnly ? (
+                <div className="stats">
+                  <div>已對齊名稱 <b>{n.saved_contacts ?? 0}</b>{n.contacts_synced_at ? <> · 上次同步 {agoLabel(n.contacts_synced_at)}</> : null}</div>
+                </div>
+              ) : (
+                <div className="stats">
+                  <div><b>{n.conversations}</b>對話</div>
+                </div>
+              )}
               {!contactsOnly && (
                 <>
                   <div>
@@ -327,29 +342,49 @@ function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id:
   )
 }
 
-interface Check { id: string; label: string; ok: boolean; optional?: boolean; detail: string; page: string }
+interface Check { id: string; label: string; ok: boolean; optional?: boolean; detail: string; page: string; steps?: string[] }
 
 /** What is done and what is left before the AI can answer customers on every channel. */
 function SetupChecklist() {
   const [checks, setChecks] = useState<Check[]>([])
   const [open, setOpen] = useState(true)
+  const [openSteps, setOpenSteps] = useState<string | null>(null)
   useEffect(() => { api<Check[]>('/setup-status').then(setChecks) }, [])
   if (!checks.length) return null
   const required = checks.filter((c) => !c.optional)
   const done = required.filter((c) => c.ok).length
+  const pct = required.length ? Math.round((done / required.length) * 100) : 100
   return (
     <section className="card ai-card setup-card">
       <div className="ai-card-head">
         <h2><Icon name="check" size={18} />設定清單（必需 {done}／{required.length}）</h2>
         <button className="btn ghost sm" onClick={() => setOpen(!open)}>{open ? '收起' : '展開'}</button>
       </div>
+      <div className="setup-progress">
+        <div className="setup-progress-track"><div className="setup-progress-fill" style={{ width: `${pct}%` }} /></div>
+        <span className="muted" style={{ fontSize: 12 }}>{done}／{required.length} 必需項目已完成</span>
+      </div>
       {open && (
         <div className="checklist">
           {checks.map((c) => (
-            <a key={c.id} className={`check ${c.ok ? 'ok' : ''}`} href={`#/${c.page}`}>
-              <span className="mark">{c.ok ? <Icon name="check" size={14} /> : null}</span>
-              <span><b>{c.label}</b>{c.optional && <span className="faint">（可選）</span>}<br /><span className="muted">{c.detail}</span></span>
-            </a>
+            <div key={c.id} className={`check ${c.ok ? 'ok' : ''}`}>
+              <a className="check-link" href={`#/${c.page}`}>
+                <span className={`mark ${c.ok ? '' : c.optional ? 'warn optional' : 'warn'}`}>{c.ok ? <Icon name="check" size={14} /> : '!'}</span>
+                <span><b>{c.label}</b>{c.optional && <span className="faint">（可選）</span>}<br /><span className="muted">{c.detail}</span></span>
+              </a>
+              {!c.ok && c.steps?.length ? (
+                <div className="check-steps-wrap">
+                  <button className="btn ghost sm" onClick={() => setOpenSteps(openSteps === c.id ? null : c.id)}>
+                    {openSteps === c.id ? '收起檢查步驟' : '檢查步驟'}
+                  </button>
+                  {openSteps === c.id && (
+                    <ol className="check-steps">
+                      {c.steps.map((s, i) => <li key={i}>{s}</li>)}
+                    </ol>
+                  )}
+                </div>
+              ) : null}
+            </div>
           ))}
         </div>
       )}

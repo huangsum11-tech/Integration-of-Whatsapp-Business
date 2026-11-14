@@ -8,7 +8,7 @@ import {
 } from './auth.js'
 import { canSend, sendReply, sendToPhone } from './channels.js'
 import { CONTACT_NAME_SQL, CONTACT_PHONE_SQL, SOCIAL_SQL, all, get, getSetting, run, setSetting, tx } from './db.js'
-import { INSTRUCTOR_CHAT_SQL, addEvent, getConversation, getTimeline, listConversations } from './inbox.js'
+import { INSTRUCTOR_CHAT_SQL, addEvent, getConversation, getTimeline, listConversations, savedNameUpdateCount } from './inbox.js'
 import { TEMPLATE_PATH, exportCsv, importCsv, importTemplate } from './knowledge.js'
 import { semanticThreshold } from './faqmatch.js'
 import { PROVIDERS, currentAi, hasKey, type Provider } from './llm.js'
@@ -31,7 +31,7 @@ import { setupStatus } from './setup.js'
 import { studio } from './routes-studio.js'
 import { homeData } from './home.js'
 import { broadcast } from './realtime.js'
-import { MEDIA_DIR, connectNumber, currentQr, disconnectNumber, isConnected, syncContacts } from './whatsapp.js'
+import { MEDIA_DIR, connectNumber, currentQr, disconnectNumber, isConnected, syncContacts, waitForSavedNamesToSettle } from './whatsapp.js'
 
 export const api = express.Router()
 
@@ -145,7 +145,8 @@ api.post('/users/:id/offboard', requireAdmin, (req, res) => {
 
 api.get('/numbers', (_req, res) => {
   const numbers = all<{ id: number; config: string }>(
-    `SELECT n.*, (SELECT COUNT(*) FROM conversations c WHERE c.number_id = n.id) AS conversations
+    `SELECT n.*, (SELECT COUNT(*) FROM conversations c WHERE c.number_id = n.id) AS conversations,
+       (SELECT COUNT(*) FROM contacts WHERE saved_name IS NOT NULL AND saved_name <> '') AS saved_contacts
      FROM numbers n ORDER BY n.id`,
   )
   // Access tokens never leave the server; only the IDs are shown.
@@ -299,7 +300,13 @@ api.post('/numbers/:id/sync-instagram-history', requireAdmin, async (req, res) =
 api.post('/numbers/:id/sync-contacts', requireAdmin, async (req, res) => {
   const id = Number(req.params.id)
   if (!isConnected(id)) return res.status(409).json({ error: '此號碼未連接（只適用於 QR Code 連接的號碼）' })
-  res.json(await syncContacts(id, undefined, true))
+  const namesBefore = savedNameUpdateCount()
+  const result = await syncContacts(id, undefined, true)
+  // Contact events stream in after the sync returns; wait for the saved-name
+  // counter to settle so the reported namesUpdated is the real landed count.
+  await waitForSavedNamesToSettle(savedNameUpdateCount)
+  const savedTotal = get<{ c: number }>("SELECT COUNT(*) AS c FROM contacts WHERE saved_name IS NOT NULL AND saved_name <> ''")!.c
+  res.json({ ...result, namesUpdated: savedNameUpdateCount() - namesBefore, savedTotal })
 })
 
 api.get('/setup-status', (_req, res) => res.json(setupStatus()))

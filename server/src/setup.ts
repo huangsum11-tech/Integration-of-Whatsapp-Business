@@ -7,7 +7,26 @@ import { all, get, getSetting } from './db.js'
 import { PROVIDERS, currentAi, hasKey } from './llm.js'
 import { canTranscribe } from './transcribe.js'
 
-interface Check { id: string; label: string; ok: boolean; optional?: boolean; detail: string; page: string }
+interface Check { id: string; label: string; ok: boolean; optional?: boolean; detail: string; page: string; steps?: string[] }
+
+/** A channel is connected but Meta has never delivered a webhook: what to check, in order. */
+const NO_WEBHOOK_STEPS: Partial<Record<string, string[]>> = {
+  messenger: [
+    '去 developers.facebook.com → 應用程式「Baton」→ 左欄「Webhooks」，物件揀「Page」，確認 messages、message_echoes、feed 三項係「已訂閱」',
+    '用另一個 Facebook 帳戶傳訊息去專頁測試（唔好用專頁自己覆自己）',
+    '仍未收到：用專頁權杖查 GET /{page-id}/subscribed_apps 確認 Baton 已訂閱專頁',
+  ],
+  instagram: [
+    '去 developers.facebook.com → 應用程式「Baton」→ 左欄「Webhooks」，物件揀「Instagram」，確認 messages 係「已訂閱」，帳戶層級訂閱開關已開',
+    '用另一個 Instagram 帳戶 DM 呢個帳戶測試',
+    '仍未收到：返 Baton 渠道頁確認 Instagram 帳戶狀態係「已連接」',
+  ],
+  wa_cloud: [
+    '去 developers.facebook.com → 應用程式「Baton」→ WhatsApp → API 設定，確認 Webhook 已訂閱 messages 欄位',
+    '確認 WABA 已訂閱呢個應用程式（subscribed_apps）',
+    '用另一部電話傳 WhatsApp 訊息去呢個號碼測試',
+  ],
+}
 
 const CHANNELS = [
   { channel: 'wa_cloud', object: 'whatsapp_business_account', label: 'WhatsApp 官方 Cloud API' },
@@ -61,6 +80,7 @@ export function setupStatus(): Check[] {
       detail: connected.length === 0 ? '未連接：「號碼」→ 連接新號碼或帳戶'
         : last === 0 ? (c.channel === 'threads' ? '已連接，等待第一次讀取留言' : '已連接，但未收過 Meta 的 webhook：檢查 Meta App 的 Webhooks 設定')
         : `已連接 ${connected.map((n) => `${n.label}（${({ off: 'AI 關閉', suggest: 'AI 建議', auto: '全自動' } as Record<string, string>)[n.reply_mode]}）`).join('、')}；最近收到訊息：${ago(last)}`,
+      ...(connected.length > 0 && last === 0 ? { steps: NO_WEBHOOK_STEPS[c.channel] } : {}),
     })
   }
   const notify = automationSettings().notify_number_id

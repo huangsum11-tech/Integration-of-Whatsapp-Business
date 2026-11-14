@@ -10,6 +10,16 @@ import { broadcast } from './realtime.js'
  */
 export const inboxEvents = new EventEmitter()
 
+/**
+ * How many contacts have actually gained (or changed) a saved name via resolveContact.
+ * Monotonically increasing; the sync-contacts endpoint snapshots it around a sync and
+ * waits for it to settle, so the UI can report how many names the sync really landed.
+ */
+let savedNameUpdates = 0
+export function savedNameUpdateCount(): number {
+  return savedNameUpdates
+}
+
 export type MessageType =
   | 'text' | 'image' | 'video' | 'audio' | 'voice' | 'document' | 'sticker' | 'location' | 'contact' | 'other'
 
@@ -111,7 +121,10 @@ export function resolveContact(ids: ContactIds, names: { saved?: string; wa?: st
     if (pn) run('UPDATE contacts SET phone = ? WHERE id = ? AND phone != ?', pn, id, pn)
     if (lid) run('UPDATE contacts SET lid = ? WHERE id = ? AND lid IS NULL', lid, id)
     const saved = names.saved ?? get<{ name: string }>('SELECT name FROM phonebook WHERE key IN (?, ?)', pn ?? '', lid ?? '')?.name
-    if (saved) run('UPDATE contacts SET saved_name = ?, updated_at = unixepoch() WHERE id = ? AND saved_name IS NOT ?', saved, id, saved)
+    if (saved) {
+      const applied = run('UPDATE contacts SET saved_name = ?, updated_at = unixepoch() WHERE id = ? AND saved_name IS NOT ?', saved, id, saved)
+      if (applied.changes > 0) savedNameUpdates++
+    }
     if (names.wa) run('UPDATE contacts SET wa_name = ?, updated_at = unixepoch() WHERE id = ? AND wa_name IS NOT ?', names.wa, id, names.wa)
     return id
   })
@@ -237,7 +250,14 @@ const CONVERSATION_SELECT = `
   SELECT c.id, c.number_id, c.contact_id, c.jid, c.assignee_id, c.status, c.unread,
          c.last_message_at, c.last_preview, c.ai_paused, c.ai_suggestion, c.needs_human,
          ${CONTACT_PHONE_SQL} AS phone, ${CONTACT_NAME_SQL} AS contact_name,
-         n.label AS number_label, n.phone AS number_phone, n.channel, n.reply_mode
+         n.label AS number_label, n.phone AS number_phone, n.channel, n.reply_mode,
+         -- Waiting on a human, mirroring automation.waitingCustomers: the chat is open,
+         -- the customer spoke last, and the AI is not still handling it on its own.
+         CASE WHEN c.status = 'open'
+                   AND (SELECT from_me FROM messages WHERE conversation_id = c.id ORDER BY ts DESC, id DESC LIMIT 1) = 0
+                   AND NOT (n.reply_mode = 'auto' AND c.ai_paused = 0 AND c.needs_human = 0)
+              THEN (SELECT ts FROM messages WHERE conversation_id = c.id ORDER BY ts DESC, id DESC LIMIT 1)
+         END AS waiting_since
   FROM conversations c
   JOIN contacts ct ON ct.id = c.contact_id
   JOIN numbers n ON n.id = c.number_id`
