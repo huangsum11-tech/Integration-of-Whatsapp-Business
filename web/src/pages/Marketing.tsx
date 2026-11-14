@@ -170,7 +170,7 @@ function CampaignEditor({ id, overview, onClose, onSaved }: { id: number | null;
             <label className="label">發送號碼</label>
             <select className="select" value={form.number_id ?? ''} onChange={(e) => setForm({ ...form, number_id: e.target.value ? Number(e.target.value) : null })}>
               <option value="">請選擇</option>
-              {numbers.filter((n) => n.channel.startsWith('wa_')).map((n) => <option key={n.id} value={n.id}>{n.label}{n.channel === 'wa_web' && !n.demo ? '（QR，有封號風險）' : ''}{n.demo ? '（示範）' : ''}</option>)}
+              {numbers.filter((n) => n.channel.startsWith('wa_') && !n.ids?.contactsOnly).map((n) => <option key={n.id} value={n.id}>{n.label}{n.channel === 'wa_web' && !n.demo ? '（QR，有封號風險）' : ''}{n.demo ? '（示範）' : ''}</option>)}
             </select>
           </div>
         </div>

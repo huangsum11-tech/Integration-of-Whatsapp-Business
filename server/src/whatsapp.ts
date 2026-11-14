@@ -48,6 +48,21 @@ export function currentQr(numberId: number) {
   return latestQr.get(numberId)
 }
 
+/**
+ * A wa_web link that exists only to keep phonebook saved names fresh for the official
+ * Cloud API number on the same phone: it syncs contacts and LID mappings, but never
+ * ingests or sends messages. Flagged by `contactsOnly: true` in numbers.config.
+ */
+export function isContactsOnly(numberId: number): boolean {
+  const row = get<{ config: string }>('SELECT config FROM numbers WHERE id = ?', numberId)
+  if (!row) return false
+  try {
+    return (JSON.parse(row.config || '{}') as { contactsOnly?: unknown }).contactsOnly === true
+  } catch {
+    return false
+  }
+}
+
 export async function connectNumber(numberId: number) {
   if (sockets.has(numberId)) return
   stopped.delete(numberId)
@@ -98,7 +113,11 @@ export async function connectNumber(numberId: number) {
     }
   })
 
+  const contactsOnly = isContactsOnly(numberId)
+
   sock.ev.on('messages.upsert', ({ messages, type }) => {
+    // A contacts-only link must never create inbox conversations; names arrive via contacts sync.
+    if (contactsOnly) return
     for (const msg of messages) ingest(numberId, sock, msg, type === 'notify')
   })
 
@@ -106,7 +125,7 @@ export async function connectNumber(numberId: number) {
     tx(() => {
       for (const m of lidPnMappings ?? []) rememberLid(jidDigits(m.lid)!, jidDigits(m.pn)!)
       saveContacts(contacts)
-      for (const msg of messages) ingest(numberId, sock, msg, false)
+      if (!contactsOnly) for (const msg of messages) ingest(numberId, sock, msg, false)
     })
     broadcast('sync', { numberId })
   })
@@ -222,6 +241,7 @@ export async function restoreAll() {
 export async function sendText(
   numberId: number, jid: string, text: string, userId: number | null, aiAssisted: boolean, aiAuto = false,
 ) {
+  if (isContactsOnly(numberId)) throw new Error('此連結只作聯絡人名同步，不能發送訊息')
   const sock = sockets.get(numberId)
   if (!sock) throw new Error('此號碼未連接')
   const sent = await sock.sendMessage(jid, { text })
@@ -233,6 +253,7 @@ export async function sendText(
 
 /** Send an image file (e.g. a payment QR code) with an optional caption. */
 export async function sendImageFile(numberId: number, jid: string, file: string, caption: string, userId: number | null, aiAuto = false) {
+  if (isContactsOnly(numberId)) throw new Error('此連結只作聯絡人名同步，不能發送訊息')
   const sock = sockets.get(numberId)
   if (!sock) throw new Error('此號碼未連接')
   const sent = await sock.sendMessage(jid, { image: fs.readFileSync(file), caption })

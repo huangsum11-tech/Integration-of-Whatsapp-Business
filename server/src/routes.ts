@@ -156,7 +156,7 @@ api.get('/numbers', (_req, res) => {
 })
 
 const newNumber = z.discriminatedUnion('channel', [
-  z.object({ channel: z.literal('wa_web'), label: z.string().min(1).max(60) }),
+  z.object({ channel: z.literal('wa_web'), label: z.string().min(1).max(60), contactsOnly: z.boolean().optional() }),
   z.object({
     channel: z.literal('wa_cloud'), label: z.string().min(1).max(60),
     phoneNumberId: z.string().regex(/^\d+$/, '電話號碼 ID 只包含數字'), accessToken: z.string().min(20),
@@ -205,7 +205,10 @@ api.post('/numbers', requireAdmin, async (req, res) => {
   // Older clients send only a label, meaning a QR-linked number.
   const b = body(z.preprocess((v) => ({ channel: 'wa_web', ...(v as object) }), newNumber), req)
   if (b.channel === 'wa_web') {
-    const id = Number(run("INSERT INTO numbers (label, status) VALUES (?, 'starting')", b.label).lastInsertRowid)
+    // A contacts-only link borrows the QR connection purely for saved-name sync (TASK-10).
+    const id = b.contactsOnly
+      ? Number(run("INSERT INTO numbers (label, status, config) VALUES (?, 'starting', ?)", b.label, JSON.stringify({ contactsOnly: true })).lastInsertRowid)
+      : Number(run("INSERT INTO numbers (label, status) VALUES (?, 'starting')", b.label).lastInsertRowid)
     await connectNumber(id)
     return res.json({ id })
   }

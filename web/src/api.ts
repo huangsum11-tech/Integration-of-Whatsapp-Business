@@ -80,8 +80,8 @@ export interface WaNumber {
   conversations: number; qr: string | null; channel: Channel; reply_mode: ReplyMode
   /** The brand whose prices, links and payment details this number uses. */
   brand_id: number | null
-  /** Official API IDs (never the access token). */
-  ids: { phoneNumberId?: string; igUserId?: string; pageId?: string; userId?: string; username?: string; name?: string; host?: 'instagram' | 'facebook'; expiresAt?: number; tokenType?: string }
+  /** Official API IDs (never the access token). contactsOnly marks a QR link kept purely for saved-name sync. */
+  ids: { phoneNumberId?: string; igUserId?: string; pageId?: string; userId?: string; username?: string; name?: string; host?: 'instagram' | 'facebook'; expiresAt?: number; tokenType?: string; contactsOnly?: boolean }
 }
 
 export type KnowledgeCategory = 'faq' | 'policy' | 'class' | 'other'

@@ -91,7 +91,7 @@ export default function Inbox({ conversationId }: { conversationId: number | nul
 
   const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
   const group = (c: Conversation) => (c.channel === 'wa_web' || c.channel === 'wa_cloud' ? 'whatsapp' : c.channel)
-  const present = [...new Set(numbers.map((n) => (n.channel === 'wa_web' || n.channel === 'wa_cloud' ? 'whatsapp' : n.channel)))]
+  const present = [...new Set(numbers.filter((n) => !n.ids?.contactsOnly).map((n) => (n.channel === 'wa_web' || n.channel === 'wa_cloud' ? 'whatsapp' : n.channel)))]
   const shown = channelFilter === 'all' ? conversations : conversations.filter((c) => group(c) === channelFilter)
   const CHIP: Record<string, string> = { whatsapp: 'WhatsApp', instagram: 'Instagram', messenger: 'Facebook', threads: 'Threads' }
 
@@ -104,7 +104,7 @@ export default function Inbox({ conversationId }: { conversationId: number | nul
             <select className="select" style={{ width: 'auto', padding: '4px 8px', fontSize: 13 }} value={numberId}
               onChange={(e) => setNumberId(e.target.value ? Number(e.target.value) : '')} aria-label="篩選號碼">
               <option value="">所有號碼</option>
-              {numbers.map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}
+              {numbers.filter((n) => !n.ids?.contactsOnly).map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}
             </select>
           </div>
           <div className="tabs" role="tablist">

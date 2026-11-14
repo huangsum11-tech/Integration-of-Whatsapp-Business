@@ -84,6 +84,7 @@ export default function Numbers() {
         {numbers.map((n) => {
           const channel = CHANNELS.find((c) => c.id === n.channel) ?? CHANNELS[0]
           const official = n.channel !== 'wa_web'
+          const contactsOnly = Boolean(n.ids?.contactsOnly)
           return (
             <div key={n.id} className="card number-card">
               <div className="top">
@@ -94,28 +95,32 @@ export default function Numbers() {
                 </div>
                 <NumberStatus status={official && n.status === 'connected' ? 'connected_api' : n.status} />
               </div>
-              <div className="faint" style={{ fontSize: 12 }}>{n.demo ? '示範號碼' : channel.title}</div>
+              <div className="faint" style={{ fontSize: 12 }}>{n.demo ? '示範號碼' : contactsOnly ? '只同步聯絡人名 · 不收發訊息' : channel.title}</div>
               {n.channel === 'instagram' && !n.demo && <TokenStatus ids={n.ids} />}
               <div className="stats">
                 <div><b>{n.conversations}</b>對話</div>
               </div>
-              <div>
-                <label className="label" htmlFor={`brand-${n.id}`}>品牌（決定價目、預約連結及收款資料）</label>
-                <BrandSelect id={`brand-${n.id}`} value={n.brand_id} disabled={!isAdmin} emptyLabel="未設定（不會報價或發收款資料）"
-                  onChange={(brand_id) => api(`/numbers/${n.id}/brand`, { method: 'PUT', body: { brand_id } }).then(refreshNumbers)} />
-              </div>
-              <div>
-                <div className="label">AI 回覆方式</div>
-                <div className="tabs" role="radiogroup" aria-label={`${n.label} 的 AI 回覆方式`}>
-                  {MODES.map((m) => (
-                    <button key={m.id} role="radio" aria-checked={n.reply_mode === m.id} title={m.hint} disabled={!isAdmin}
-                      className={`tab ${n.reply_mode === m.id ? 'active' : ''}`} onClick={() => n.reply_mode !== m.id && setMode(n, m.id)}>
-                      {m.id !== 'off' && <Icon name="sparkle" size={12} />} {m.label}
-                    </button>
-                  ))}
-                </div>
-                <div className="faint" style={{ fontSize: 12, marginTop: 4 }}>{MODES.find((m) => m.id === n.reply_mode)?.hint}</div>
-              </div>
+              {!contactsOnly && (
+                <>
+                  <div>
+                    <label className="label" htmlFor={`brand-${n.id}`}>品牌（決定價目、預約連結及收款資料）</label>
+                    <BrandSelect id={`brand-${n.id}`} value={n.brand_id} disabled={!isAdmin} emptyLabel="未設定（不會報價或發收款資料）"
+                      onChange={(brand_id) => api(`/numbers/${n.id}/brand`, { method: 'PUT', body: { brand_id } }).then(refreshNumbers)} />
+                  </div>
+                  <div>
+                    <div className="label">AI 回覆方式</div>
+                    <div className="tabs" role="radiogroup" aria-label={`${n.label} 的 AI 回覆方式`}>
+                      {MODES.map((m) => (
+                        <button key={m.id} role="radio" aria-checked={n.reply_mode === m.id} title={m.hint} disabled={!isAdmin}
+                          className={`tab ${n.reply_mode === m.id ? 'active' : ''}`} onClick={() => n.reply_mode !== m.id && setMode(n, m.id)}>
+                          {m.id !== 'off' && <Icon name="sparkle" size={12} />} {m.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="faint" style={{ fontSize: 12, marginTop: 4 }}>{MODES.find((m) => m.id === n.reply_mode)?.hint}</div>
+                  </div>
+                </>
+              )}
               {isAdmin && !n.demo && (
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {!official && n.status !== 'connected' && <button className="btn sm primary" onClick={() => reconnect(n.id)}><Icon name="qr" size={14} />{n.status === 'qr' ? '顯示 QR Code' : '重新連接'}</button>}
@@ -192,6 +197,7 @@ const WEBHOOK_FIELDS: Partial<Record<Channel, string>> = {
 
 function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: number, channel: Channel, warning?: string) => void }) {
   const [channel, setChannel] = useState<Channel | null>(null)
+  const [contactsOnly, setContactsOnly] = useState(false)
   const [form, setForm] = useState({ label: '', phoneNumberId: '', pageId: '', igUserId: '', accessToken: '' })
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -201,7 +207,7 @@ function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id:
     if (!channel) return
     setBusy(true); setError('')
     try {
-      const body = channel === 'wa_web' ? { channel, label: form.label }
+      const body = channel === 'wa_web' ? { channel, label: form.label, ...(contactsOnly ? { contactsOnly: true } : {}) }
         : channel === 'wa_cloud' ? { channel, label: form.label, phoneNumberId: form.phoneNumberId, accessToken: form.accessToken }
         : channel === 'messenger' ? { channel, label: form.label, pageId: form.pageId, accessToken: form.accessToken }
         : channel === 'instagram' ? { channel, label: form.label, accessToken: form.accessToken, ...(form.igUserId ? { igUserId: form.igUserId } : {}) }
@@ -247,6 +253,17 @@ function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id:
         <input id="num-label" className="input" autoFocus placeholder={channel.startsWith('wa_') ? '例如：客戶熱線、旺角分店' : '例如：主帳戶'}
           value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} />
       </div>
+      {channel === 'wa_web' && (
+        <div>
+          <label className="toggle-row">
+            <input type="checkbox" checked={contactsOnly} onChange={(e) => setContactsOnly(e.target.checked)} />
+            只同步聯絡人名（不收發訊息）
+          </label>
+          <div className="faint" style={{ fontSize: 12, marginTop: 4 }}>
+            俾官方 Cloud API 號碼借用：連結同一部電話，只更新客人喺電話簿入面嘅儲存名，唔會收發訊息，亦唔會建立對話。名稱建議填「（品牌）名稱同步」，例如「Fuse Fitness 名稱同步」。
+          </div>
+        </div>
+      )}
       {channel === 'wa_cloud' && (
         <>
           <div>
