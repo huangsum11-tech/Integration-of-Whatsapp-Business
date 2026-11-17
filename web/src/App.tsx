@@ -85,6 +85,9 @@ function Shell({ me, setMe, onLogout }: { me: User; setMe: (u: User) => void; on
   const routes = ROUTES.filter((r) => !r.admin || me.role === 'admin')
   const page = routes.some((r) => r.path === route[0]) ? route[0] : 'today'
   const [menuOpen, setMenuOpen] = useState(false)
+  // Wide screens: the labelled sidebar can be folded down to icons; remembered per browser.
+  const [railCollapsed, setRailCollapsed] = useState(() => { try { return localStorage.getItem('baton.railCollapsed') === '1' } catch { return false } })
+  const toggleRail = () => setRailCollapsed((c) => { try { localStorage.setItem('baton.railCollapsed', c ? '0' : '1') } catch { /* private mode */ } return !c })
 
   const refreshUsers = useCallback(() => { api<User[]>('/users').then(setUsers) }, [])
   const refreshNumbers = useCallback(() => { api<WaNumber[]>('/numbers').then(setNumbers) }, [])
@@ -109,7 +112,7 @@ function Shell({ me, setMe, onLogout }: { me: User; setMe: (u: User) => void; on
 
   return (
     <AppContext.Provider value={{ me, users, numbers, refreshUsers, refreshNumbers, setMe }}>
-      <div className="shell">
+      <div className={`shell ${railCollapsed ? 'rail-collapsed' : ''}`}>
         <nav className="rail" aria-label="主選單">
           <a className="logo" href="#/today" aria-label="Baton 今日">
             <Logo size={42} />
@@ -124,6 +127,10 @@ function Shell({ me, setMe, onLogout }: { me: User; setMe: (u: User) => void; on
             </a>
           ))}
           <div className="spacer" />
+          <button className="rail-btn rail-toggle" onClick={toggleRail} aria-label={railCollapsed ? '展開選單' : '收起選單'} title={railCollapsed ? '展開選單' : '收起選單'}>
+            <Icon name="sidebar" size={20} />
+            <span className="rail-label">收起選單</span>
+          </button>
           <div className="me-menu">
             <button className="rail-btn me-btn" onClick={() => setMenuOpen(!menuOpen)} aria-expanded={menuOpen} aria-label={`${me.name}：帳戶選單`}>
               <Avatar name={me.name} color={me.color} size={30} />

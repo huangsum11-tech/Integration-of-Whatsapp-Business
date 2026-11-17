@@ -524,7 +524,7 @@ a.channel-strip.empty { color: var(--coral); border-color: #f3cfc5; }
 .now-line span { border-top: 2px solid var(--ink); font-size: 12px; color: var(--ink); font-weight: 500; padding-top: 2px; }
 
 /* Inbox: one list for every channel */
-.channel-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.channel-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .channel-chip {
   display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; padding: 3px 10px; border-radius: 999px;
   border: 1px solid var(--line); background: var(--surface); font-size: 12px; color: var(--muted);
@@ -588,30 +588,33 @@ textarea.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; fon
 
 /* ---------- Wide sidebar (2026-11 redesign): icon + label list on large screens ---------- */
 .rail-brand { display: none; }
+.rail-toggle { display: none; color: var(--muted); }
 @media (min-width: 1101px) {
-  .shell { grid-template-columns: 232px 1fr; }
-  .rail {
+  .shell:not(.rail-collapsed) { grid-template-columns: 232px 1fr; }
+  .shell:not(.rail-collapsed) .rail {
     background: var(--surface); border-right: 1px solid var(--line);
     align-items: stretch; padding: 18px 14px; gap: 2px;
   }
-  .rail .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); margin: 0 4px 14px; padding-bottom: 16px; border-bottom: 1px solid var(--line-2); }
-  .rail-brand { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
-  .rail-brand b { font-family: var(--font-display); font-size: 16px; }
-  .rail-brand small { font-size: 10.5px; letter-spacing: .08em; color: var(--muted); margin-top: 3px; }
-  .rail-btn {
+  .shell:not(.rail-collapsed) .rail .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); margin: 0 4px 14px; padding-bottom: 16px; border-bottom: 1px solid var(--line-2); }
+  .shell:not(.rail-collapsed) .rail-brand { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+  .shell:not(.rail-collapsed) .rail-brand b { font-family: var(--font-display); font-size: 16px; }
+  .shell:not(.rail-collapsed) .rail-brand small { font-size: 10.5px; letter-spacing: .08em; color: var(--muted); margin-top: 3px; }
+  .shell:not(.rail-collapsed) .rail-btn {
     width: auto; flex-direction: row; justify-content: flex-start; gap: 12px;
     padding: 10px 12px; font-size: 15px; color: var(--text); border-radius: 10px;
   }
-  .rail-btn svg { color: var(--muted); flex-shrink: 0; }
-  .rail-btn:hover { background: var(--paper); color: var(--text); }
-  .rail-btn.active { background: var(--pine-50); color: var(--pine-600); font-weight: 600; }
-  .rail-btn.active svg { color: var(--pine); }
-  .rail-btn.active::before { display: none; }
-  .rail-btn .dot { position: static; margin-left: auto; min-width: 22px; height: 22px; border-radius: 11px; font-size: 11px; }
-  .me-btn { gap: 10px; }
-  .me-btn .avatar { box-shadow: none; }
-  .me-name { max-width: 140px; font-size: 14px; }
-  .me-pop { left: 0; bottom: calc(100% + 8px); }
+  .shell:not(.rail-collapsed) .rail-btn svg { color: var(--muted); flex-shrink: 0; }
+  .shell:not(.rail-collapsed) .rail-btn:hover { background: var(--paper); color: var(--text); }
+  .shell:not(.rail-collapsed) .rail-btn.active { background: var(--pine-50); color: var(--pine-600); font-weight: 600; }
+  .shell:not(.rail-collapsed) .rail-btn.active svg { color: var(--pine); }
+  .shell:not(.rail-collapsed) .rail-btn.active::before { display: none; }
+  .shell:not(.rail-collapsed) .rail-btn .dot { position: static; margin-left: auto; min-width: 22px; height: 22px; border-radius: 11px; font-size: 11px; }
+  .shell:not(.rail-collapsed) .me-btn { gap: 10px; }
+  .shell:not(.rail-collapsed) .me-btn .avatar { box-shadow: none; }
+  .shell:not(.rail-collapsed) .me-name { max-width: 140px; font-size: 14px; }
+  .shell:not(.rail-collapsed) .me-pop { left: 0; bottom: calc(100% + 8px); }
+  .rail-toggle { display: flex; }
+  .shell.rail-collapsed .rail-toggle .rail-label { display: none; }
 }
 
 /* ---------- Channels page (2026-11 redesign) ---------- */
