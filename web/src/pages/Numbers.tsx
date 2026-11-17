@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BrandSelect } from './BrandSelect'
+import { BrandSelect, loadBrands } from './BrandSelect'
 import { api, type Channel, type ReplyMode, type WaNumber } from '../api'
 import { useApp } from '../App'
 import { Icon, Modal, NumberStatus, type IconName } from '../components'
@@ -26,6 +26,25 @@ const MODES: { id: ReplyMode; label: string; hint: string }[] = [
   { id: 'auto', label: '全自動', hint: 'AI 直接回覆客人，不確定時轉交同事' },
 ]
 
+const MODE_CHIP: Record<ReplyMode, string> = { off: 'AI 關閉', suggest: 'AI 建議', auto: '全自動回覆' }
+const CARD_TITLE: Record<Channel, string> = { wa_cloud: 'WhatsApp 官方 API', wa_web: 'WhatsApp（QR 連結）', instagram: 'Instagram', messenger: 'Facebook Messenger', threads: 'Threads' }
+const CARD_NOTE: Record<Channel, string> = {
+  wa_cloud: '客人訊息、AI 回覆、廣播都經呢張卡。',
+  wa_web: '經手機 WhatsApp 連結收發；只建議人手回覆。',
+  instagram: 'IG 私訊同留言自動私訊都經呢張卡。',
+  messenger: 'Facebook 專頁私訊同留言自動私訊都經呢張卡。',
+  threads: '讀取帖子下嘅留言並公開回覆。',
+}
+
+/** Short token chip for an Instagram account card. */
+function TokenChip({ ids }: { ids: WaNumber['ids'] }) {
+  if (ids.host !== 'facebook') return <span className="chip">權杖每星期自動續期</span>
+  if (ids.expiresAt === undefined) return null
+  if (ids.expiresAt === 0) return <span className="chip">權杖永不過期</span>
+  const days = Math.floor((ids.expiresAt * 1000 - Date.now()) / 86400000)
+  return <span className={`chip ${days <= 7 ? 'coral' : ''}`}>{days < 0 ? '權杖已過期' : `權杖約 ${days} 日後到期`}</span>
+}
+
 export default function Numbers() {
   const { numbers, me, refreshNumbers } = useApp()
   const [adding, setAdding] = useState(false)
@@ -35,7 +54,9 @@ export default function Numbers() {
   const [setupKey, setSetupKey] = useState(0)
 
   const [syncing, setSyncing] = useState<number | null>(null)
-  const [syncResult, setSyncResult] = useState('')
+  const [syncResult, setSyncResultText] = useState('')
+  const [syncError, setSyncError] = useState(false)
+  const setSyncResult = (text: string, error = false) => { setSyncResultText(text); setSyncError(error) }
   const syncContacts = async (id: number) => {
     setSyncing(id); setSyncResult('')
     try {
@@ -47,7 +68,7 @@ export default function Numbers() {
         ? `${summary}仍有 ${r.unresolved} 位客戶的號碼被 WhatsApp 隱藏，佢哋下次傳訊息時會自動補上。`
         : summary)
     } catch (err) {
-      setSyncResult(err instanceof Error ? err.message : '同步失敗')
+      setSyncResult(err instanceof Error ? err.message : '同步失敗', true)
     } finally {
       setSyncing(null)
     }
@@ -60,7 +81,7 @@ export default function Numbers() {
       setSyncResult(`歷史對話同步完成：Meta 共列出 ${r.listed} 個對話，新增 ${r.conversations} 個對話、${r.messages} 條訊息${r.skipped ? `，跳過 ${r.skipped} 條已有紀錄` : ''}${r.failed ? `；${r.failed} 個對話讀取失敗${r.error ? `（${r.error}）` : ''}，再同步一次可補回` : ''}。匯入的對話會標示為已完成，不會觸發自動回覆。`)
       refreshNumbers()
     } catch (err) {
-      setSyncResult(err instanceof Error ? err.message : '同步失敗')
+      setSyncResult(err instanceof Error ? err.message : '同步失敗', true)
     } finally {
       setHistorySyncing(null)
     }
@@ -78,70 +99,117 @@ export default function Numbers() {
     refreshNumbers(); setSetupKey((k) => k + 1)
   }
 
+  const [brandNames, setBrandNames] = useState<Record<number, string>>({})
+  useEffect(() => { loadBrands().then((bs) => setBrandNames(Object.fromEntries(bs.map((b) => [b.id, b.name])))) }, [])
+  const [checks, setChecks] = useState<Check[]>([])
+  const loadChecks = () => { api<Check[]>('/setup-status').then(setChecks).catch(() => {}) }
+  useEffect(loadChecks, [setupKey])
+  const [managing, setManaging] = useState<number | null>(null)
+  const refreshAll = () => { refreshNumbers(); loadChecks() }
+
   return (
     <div className="page">
       <div className="page-head">
         <div>
-          <h1>渠道</h1>
-          <p>連接 WhatsApp、Instagram、Facebook Messenger 和 Threads，並設定每個帳戶的 AI 回覆方式。</p>
+          <div className="faint" style={{ fontSize: 13 }}>設定 › 渠道</div>
+          <h1>渠道連接</h1>
+          <p>WhatsApp、Instagram、Messenger 集中喺同一個收件匣；電話簿名稱會自動同步對齊。</p>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn" onClick={refreshAll}>重新整理狀態</button>
+          {isAdmin && <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" size={15} />連接渠道</button>}
         </div>
       </div>
 
-      <SetupChecklist key={setupKey} />
-      {syncResult && <div className="demo-hint" style={{ marginBottom: 16 }}>{syncResult}</div>}
-      <div className="number-cards">
+      {syncResult && (
+        <div className={`ch-banner ${syncError ? 'error' : ''}`} role="status">
+          <span className="ch-banner-icon">{syncError ? '!' : <Icon name="check" size={16} />}</span>
+          <div><b>{syncResult}</b></div>
+          <button className="btn ghost sm" onClick={() => setSyncResult('')}>關閉</button>
+        </div>
+      )}
+      <div className="number-cards ch-cards">
         {numbers.map((n) => {
           const channel = CHANNELS.find((c) => c.id === n.channel) ?? CHANNELS[0]
           const official = n.channel !== 'wa_web'
           const contactsOnly = Boolean(n.ids?.contactsOnly)
+          const connected = n.status === 'connected' || n.status === 'demo'
+          const noWebhook = checks.find((c) => c.id === n.channel && c.steps?.length)
+          const title = contactsOnly ? '名稱同步連結' : n.demo ? n.label : CARD_TITLE[n.channel]
+          const sub = contactsOnly ? `同一部電話 · ${formatPhone(n.phone) || '未連接'}` : n.demo ? `示範號碼 · ${formatPhone(n.phone)}` : [n.label, formatPhone(n.phone)].filter(Boolean).join(' · ')
+          const open = managing === n.id
           return (
-            <div key={n.id} className="card number-card">
+            <div key={n.id} className={`card ch-card ${contactsOnly ? 'contacts-only' : ''}`}>
               <div className="top">
-                <div className="icon"><Icon name={CHANNEL_ICON[n.channel] ?? 'phone'} size={22} /></div>
+                <div className="icon"><Icon name={contactsOnly ? 'handoff' : CHANNEL_ICON[n.channel] ?? 'phone'} size={22} /></div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 15 }}>{n.label}{contactsOnly && <span className="chip pine" style={{ fontSize: 11, padding: '0 7px', marginLeft: 8, verticalAlign: 2 }}>名同步</span>}</div>
-                  <div className="muted num" style={{ fontSize: 13 }}>{formatPhone(n.phone) || '尚未連接'}</div>
+                  <div className="ch-title">{title}</div>
+                  <div className="ch-sub num">{sub || '尚未連接'}</div>
                 </div>
-                <NumberStatus status={official && n.status === 'connected' ? 'connected_api' : n.status} />
+                {contactsOnly && <span className="chip pine">名同步</span>}
               </div>
-              <div className="faint" style={{ fontSize: 12 }}>{n.demo ? '示範號碼' : contactsOnly ? '只同步聯絡人名 · 不收發訊息' : channel.title}</div>
-              {n.channel === 'instagram' && !n.demo && <TokenStatus ids={n.ids} />}
-              {contactsOnly ? (
-                <div className="stats">
-                  <div>已對齊名稱 <b>{n.saved_contacts ?? 0}</b>{n.contacts_synced_at ? <> · 上次同步 {agoLabel(n.contacts_synced_at)}</> : null}</div>
-                </div>
-              ) : (
-                <div className="stats">
-                  <div><b>{n.conversations}</b>對話</div>
-                </div>
-              )}
-              {!contactsOnly && (
-                <>
-                  <div>
-                    <label className="label" htmlFor={`brand-${n.id}`}>品牌（決定價目、預約連結及收款資料）</label>
-                    <BrandSelect id={`brand-${n.id}`} value={n.brand_id} disabled={!isAdmin} emptyLabel="未設定（不會報價或發收款資料）"
-                      onChange={(brand_id) => api(`/numbers/${n.id}/brand`, { method: 'PUT', body: { brand_id } }).then(refreshNumbers)} />
-                  </div>
-                  <div>
-                    <div className="label">AI 回覆方式</div>
-                    <div className="tabs" role="radiogroup" aria-label={`${n.label} 的 AI 回覆方式`}>
-                      {MODES.map((m) => (
-                        <button key={m.id} role="radio" aria-checked={n.reply_mode === m.id} title={m.hint} disabled={!isAdmin}
-                          className={`tab ${n.reply_mode === m.id ? 'active' : ''}`} onClick={() => n.reply_mode !== m.id && setMode(n, m.id)}>
-                          {m.id !== 'off' && <Icon name="sparkle" size={12} />} {m.label}
-                        </button>
-                      ))}
+              <div className={`ch-status ${connected ? '' : 'off'}`}>
+                {connected ? <><span className="led" />已連接</> : <NumberStatus status={n.status} />}
+                {noWebhook && <span className="chip coral">! 未收過 webhook</span>}
+              </div>
+              <div className="ch-chips">
+                {contactsOnly ? (
+                  <><span className="chip">只同步聯絡人名</span><span className="chip">不收發訊息</span></>
+                ) : (
+                  <>
+                    <span className="chip"><b>{n.conversations}</b>&nbsp;對話</span>
+                    <span className="chip">{MODE_CHIP[n.reply_mode]}</span>
+                    <span className="chip">{n.brand_id ? `品牌 ${brandNames[n.brand_id] ?? ''}` : '未設品牌'}</span>
+                    {n.channel === 'instagram' && !n.demo && <TokenChip ids={n.ids} />}
+                    {noWebhook && <button className="chip" style={{ cursor: 'pointer' }} onClick={() => document.getElementById('setup-checklist')?.scrollIntoView({ behavior: 'smooth' })}>見下方清單處理方法</button>}
+                  </>
+                )}
+              </div>
+              <div className="ch-note">
+                <span>{contactsOnly
+                  ? <>只同步聯絡人名 · 不收發訊息{n.contacts_synced_at ? <> · 上次同步 {agoLabel(n.contacts_synced_at)}</> : null} · 已對齊 {n.saved_contacts ?? 0} 名</>
+                  : noWebhook ? '連接本身冇問題；警告嘅意思係 Meta 未曾送過訊息嚟，跟設定清單逐步檢查。'
+                  : CARD_NOTE[n.channel]}</span>
+                {isAdmin && !n.demo && contactsOnly && connected && (
+                  <button className="btn ghost sm" style={{ color: 'var(--pine)' }} disabled={syncing === n.id} onClick={() => syncContacts(n.id)}>{syncing === n.id ? '同步中…' : '立即同步'}</button>
+                )}
+                {isAdmin && !n.demo && !official && !connected && n.status !== 'unlinked' && (
+                  <button className="btn sm primary" onClick={() => reconnect(n.id)}><Icon name="qr" size={14} />{n.status === 'qr' ? '顯示 QR Code' : '重新連接'}</button>
+                )}
+                <button className="btn ghost sm" style={{ color: 'var(--pine)' }} aria-expanded={open} onClick={() => setManaging(open ? null : n.id)}>{open ? '收起' : '管理'}</button>
+              </div>
+              {open && (
+                <div className="ch-manage">
+                  <div className="faint" style={{ fontSize: 12 }}>{channel.title}</div>
+                  {!contactsOnly && (
+                    <>
+                      <div>
+                        <label className="label" htmlFor={`brand-${n.id}`}>品牌（決定價目、預約連結及收款資料）</label>
+                        <BrandSelect id={`brand-${n.id}`} value={n.brand_id} disabled={!isAdmin} emptyLabel="未設定（不會報價或發收款資料）"
+                          onChange={(brand_id) => api(`/numbers/${n.id}/brand`, { method: 'PUT', body: { brand_id } }).then(refreshNumbers)} />
+                      </div>
+                      <div>
+                        <div className="label">AI 回覆方式</div>
+                        <div className="tabs" role="radiogroup" aria-label={`${n.label} 的 AI 回覆方式`}>
+                          {MODES.map((m) => (
+                            <button key={m.id} role="radio" aria-checked={n.reply_mode === m.id} title={m.hint} disabled={!isAdmin}
+                              className={`tab ${n.reply_mode === m.id ? 'active' : ''}`} onClick={() => n.reply_mode !== m.id && setMode(n, m.id)}>
+                              {m.id !== 'off' && <Icon name="sparkle" size={12} />} {m.label}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="faint" style={{ fontSize: 12, marginTop: 4 }}>{MODES.find((m) => m.id === n.reply_mode)?.hint}</div>
+                      </div>
+                    </>
+                  )}
+                  {n.channel === 'instagram' && !n.demo && <TokenStatus ids={n.ids} />}
+                  {isAdmin && !n.demo && (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {!official && connected && !contactsOnly && <button className="btn sm" disabled={syncing === n.id} onClick={() => syncContacts(n.id)}><Icon name="contacts" size={14} />{syncing === n.id ? '同步中…' : '同步聯絡人'}</button>}
+                      {n.channel === 'instagram' && n.status === 'connected' && <button className="btn sm" disabled={historySyncing === n.id} onClick={() => syncHistory(n.id)}><Icon name="clock" size={14} />{historySyncing === n.id ? '同步中…' : '同步歷史對話'}</button>}
+                      {n.status !== 'unlinked' && <button className="btn sm danger" onClick={() => unlink(n)}>{official ? '中斷連接' : '解除連結'}</button>}
                     </div>
-                    <div className="faint" style={{ fontSize: 12, marginTop: 4 }}>{MODES.find((m) => m.id === n.reply_mode)?.hint}</div>
-                  </div>
-                </>
-              )}
-              {isAdmin && !n.demo && (
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {!official && n.status !== 'connected' && <button className="btn sm primary" onClick={() => reconnect(n.id)}><Icon name="qr" size={14} />{n.status === 'qr' ? '顯示 QR Code' : '重新連接'}</button>}
-                  {!official && n.status === 'connected' && <button className="btn sm" disabled={syncing === n.id} onClick={() => syncContacts(n.id)}><Icon name="contacts" size={14} />{syncing === n.id ? '同步中…' : '同步聯絡人'}</button>}
-                  {n.channel === 'instagram' && n.status === 'connected' && <button className="btn sm" disabled={historySyncing === n.id} onClick={() => syncHistory(n.id)}><Icon name="clock" size={14} />{historySyncing === n.id ? '同步中…' : '同步歷史對話'}</button>}
-                  {n.status !== 'unlinked' && <button className="btn sm danger" onClick={() => unlink(n)}>{official ? '中斷連接' : '解除連結'}</button>}
+                  )}
                 </div>
               )}
             </div>
@@ -155,6 +223,7 @@ export default function Numbers() {
           </button>
         )}
       </div>
+      <SetupChecklist checks={checks} />
 
       {adding && <AddModal onClose={() => setAdding(false)} onCreated={(id, channel, warning) => {
         setAdding(false); refreshNumbers(); setSetupKey((k) => k + 1)
@@ -345,17 +414,15 @@ function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id:
 interface Check { id: string; label: string; ok: boolean; optional?: boolean; detail: string; page: string; steps?: string[] }
 
 /** What is done and what is left before the AI can answer customers on every channel. */
-function SetupChecklist() {
-  const [checks, setChecks] = useState<Check[]>([])
+function SetupChecklist({ checks }: { checks: Check[] }) {
   const [open, setOpen] = useState(true)
   const [openSteps, setOpenSteps] = useState<string | null>(null)
-  useEffect(() => { api<Check[]>('/setup-status').then(setChecks) }, [])
   if (!checks.length) return null
   const required = checks.filter((c) => !c.optional)
   const done = required.filter((c) => c.ok).length
   const pct = required.length ? Math.round((done / required.length) * 100) : 100
   return (
-    <section className="card ai-card setup-card">
+    <section className="card ai-card setup-card" id="setup-checklist" style={{ marginTop: 18 }}>
       <div className="ai-card-head">
         <h2><Icon name="check" size={18} />設定清單（必需 {done}／{required.length}）</h2>
         <button className="btn ghost sm" onClick={() => setOpen(!open)}>{open ? '收起' : '展開'}</button>

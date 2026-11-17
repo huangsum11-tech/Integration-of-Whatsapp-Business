@@ -111,11 +111,14 @@ function Shell({ me, setMe, onLogout }: { me: User; setMe: (u: User) => void; on
     <AppContext.Provider value={{ me, users, numbers, refreshUsers, refreshNumbers, setMe }}>
       <div className="shell">
         <nav className="rail" aria-label="主選單">
-          <a className="logo" href="#/today" aria-label="Baton 今日"><Logo size={42} /></a>
+          <a className="logo" href="#/today" aria-label="Baton 今日">
+            <Logo size={42} />
+            <span className="rail-brand"><b>Baton 接棒</b><small>FUSE CUSTOMER CARE</small></span>
+          </a>
           {routes.map((r) => (
             <a key={r.path} href={`#/${r.path}`} className={`rail-btn ${page === r.path ? 'active' : ''}`} aria-current={page === r.path ? 'page' : undefined}>
               <Icon name={r.icon} size={21} />
-              {r.label}
+              <span className="rail-label">{r.label}</span>
               {r.path === 'inbox' && unread > 0 && <span className="dot">{unread}</span>}
               {r.path === 'payments' && toCheck > 0 && <span className="dot" aria-label={`${toCheck} 筆待處理`}>{toCheck}</span>}
             </a>

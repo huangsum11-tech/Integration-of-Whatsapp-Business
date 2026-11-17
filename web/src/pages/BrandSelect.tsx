@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 
 let cache: Promise<{ id: number; name: string }[]> | null = null
-const loadBrands = () => (cache ??= api<{ brands: { id: number; name: string }[] }>('/brands').then((d) => d.brands))
+export const loadBrands = () => (cache ??= api<{ brands: { id: number; name: string }[] }>('/brands').then((d) => d.brands))
 
 /** Pick one brand (or none). */
 export function BrandSelect({ id, value, onChange, disabled, emptyLabel }: {

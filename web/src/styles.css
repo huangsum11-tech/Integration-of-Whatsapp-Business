@@ -585,3 +585,58 @@ a.channel-strip.empty { color: var(--coral); border-color: #f3cfc5; }
 .bo-steps { margin: 4px 0 0; padding-left: 20px; font-size: 13px; display: grid; gap: 2px; }
 .bo-steps li.bad { color: var(--coral); }
 textarea.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; width: 100%; }
+
+/* ---------- Wide sidebar (2026-11 redesign): icon + label list on large screens ---------- */
+.rail-brand { display: none; }
+@media (min-width: 1101px) {
+  .shell { grid-template-columns: 232px 1fr; }
+  .rail {
+    background: var(--surface); border-right: 1px solid var(--line);
+    align-items: stretch; padding: 18px 14px; gap: 2px;
+  }
+  .rail .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); margin: 0 4px 14px; padding-bottom: 16px; border-bottom: 1px solid var(--line-2); }
+  .rail-brand { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+  .rail-brand b { font-family: var(--font-display); font-size: 16px; }
+  .rail-brand small { font-size: 10.5px; letter-spacing: .08em; color: var(--muted); margin-top: 3px; }
+  .rail-btn {
+    width: auto; flex-direction: row; justify-content: flex-start; gap: 12px;
+    padding: 10px 12px; font-size: 15px; color: var(--text); border-radius: 10px;
+  }
+  .rail-btn svg { color: var(--muted); flex-shrink: 0; }
+  .rail-btn:hover { background: var(--paper); color: var(--text); }
+  .rail-btn.active { background: var(--pine-50); color: var(--pine-600); font-weight: 600; }
+  .rail-btn.active svg { color: var(--pine); }
+  .rail-btn.active::before { display: none; }
+  .rail-btn .dot { position: static; margin-left: auto; min-width: 22px; height: 22px; border-radius: 11px; font-size: 11px; }
+  .me-btn { gap: 10px; }
+  .me-btn .avatar { box-shadow: none; }
+  .me-name { max-width: 140px; font-size: 14px; }
+  .me-pop { left: 0; bottom: calc(100% + 8px); }
+}
+
+/* ---------- Channels page (2026-11 redesign) ---------- */
+.ch-banner { display: flex; gap: 14px; align-items: flex-start; padding: 16px 18px; margin-bottom: 18px; border-radius: var(--radius); border: 1px solid var(--pine-100); background: var(--pine-50); }
+.ch-banner.error { border-color: #f3c9bd; background: var(--coral-50); }
+.ch-banner .ch-banner-icon { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; background: var(--pine); color: #fff; }
+.ch-banner.error .ch-banner-icon { background: var(--coral); }
+.ch-banner b { display: block; font-size: 15px; }
+.ch-banner .muted { font-size: 13px; }
+.ch-banner .btn { margin-left: auto; flex-shrink: 0; }
+.ch-card { padding: 18px; display: flex; flex-direction: column; gap: 12px; border-radius: var(--radius); }
+.ch-card.contacts-only { border: 1.5px dashed var(--pine-100); }
+.ch-card .top { display: flex; align-items: flex-start; gap: 12px; }
+.ch-card .icon { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--pine-50); color: var(--pine); flex-shrink: 0; }
+.ch-card .ch-title { font-weight: 700; font-size: 16px; }
+.ch-card .ch-sub { font-size: 13px; color: var(--muted); }
+.ch-card .ch-status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; font-weight: 600; color: var(--pine-600); }
+.ch-card .ch-status.off { color: var(--muted); }
+.ch-card .ch-status .led { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.ch-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.ch-chips .chip { background: var(--paper); color: var(--text); border: 1px solid var(--line-2); font-size: 12.5px; padding: 3px 10px; }
+.ch-chips .chip.coral { background: var(--coral-50); color: #b2432c; border-color: #f3c9bd; }
+.ch-note { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line-2); padding-top: 12px; display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin-top: auto; }
+.ch-note > span { flex: 1 1 100%; }
+.ch-note > .btn:first-of-type { margin-left: auto; }
+.ch-cards { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); align-items: start; }
+.ch-manage { display: flex; flex-direction: column; gap: 12px; border-top: 1px solid var(--line-2); padding-top: 12px; }
+.chip.warn-amber { background: var(--amber-50); color: #8a6d1a; border: 1px solid var(--amber-line); }
