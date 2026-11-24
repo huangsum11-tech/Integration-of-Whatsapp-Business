@@ -129,6 +129,9 @@ inboxEvents.on('customer-message', ({ conversationId, numberId, messageId }: Mes
     respond(conversationId).catch((err) => {
       console.error('Auto-reply failed', err)
       addEvent(conversationId, null, 'ai_error', err instanceof Error ? err.message : 'AI 回覆失敗')
+      // The customer got no answer: put the chat in the team's 待人工 queue.
+      run('UPDATE conversations SET needs_human = 1 WHERE id = ?', conversationId)
+      broadcast('conversation', getConversation(conversationId))
     })
   }, DELAY_MS))
 })

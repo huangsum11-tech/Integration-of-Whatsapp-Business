@@ -77,7 +77,28 @@ async function claude(model: string, req: LlmRequest): Promise<string> {
   return response.content.filter((b) => b.type === 'text').map((b) => b.text).join('')
 }
 
+/**
+ * Gemini is often briefly overloaded ("high demand", 429/5xx) or returns no text. Retry twice,
+ * then try the default model once, before giving up.
+ */
 async function gemini(model: string, req: LlmRequest): Promise<string> {
+  const plan = [model, model, model, ...(model === PROVIDERS.gemini.defaultModel ? [] : [PROVIDERS.gemini.defaultModel])]
+  let lastError: unknown
+  for (const [i, m] of plan.entries()) {
+    if (i > 0) await new Promise((r) => setTimeout(r, [0, 2000, 5000, 1000][i]))
+    try {
+      const text = await geminiOnce(m, req)
+      if (text.trim()) return text
+      lastError = new Error('AI 未有產生內容')
+    } catch (err) {
+      if (err instanceof AiUnavailableError || !(err as { retryable?: boolean }).retryable) throw err
+      lastError = err
+    }
+  }
+  throw lastError
+}
+
+async function geminiOnce(model: string, req: LlmRequest): Promise<string> {
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY! },
@@ -92,7 +113,11 @@ async function gemini(model: string, req: LlmRequest): Promise<string> {
     candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[]
   }
   if (res.status === 401 || res.status === 403) throw new AiUnavailableError('GEMINI_API_KEY 無效，AI 暫不可用')
-  if (!res.ok) throw new Error(`Gemini 錯誤：${data.error?.message ?? res.status}`)
+  if (!res.ok) {
+    const err = new Error(`Gemini 錯誤：${data.error?.message ?? res.status}`) as Error & { retryable?: boolean }
+    err.retryable = res.status === 429 || res.status >= 500 || /high demand|overloaded|try again/i.test(data.error?.message ?? '')
+    throw err
+  }
   return (data.candidates?.[0]?.content?.parts ?? []).filter((p) => !p.thought).map((p) => p.text ?? '').join('')
 }
 
