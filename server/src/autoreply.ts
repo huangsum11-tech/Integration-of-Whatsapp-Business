@@ -27,6 +27,10 @@ const MAX_AUTO_PER_HOUR = 15
 const timers = new Map<number, NodeJS.Timeout>()
 
 /** Sent when the customer asks for a person and no handoff message is set. */
+/** The customer asks for the timetable (not which kinds of class: that stays a knowledge-base answer). */
+export const TIMETABLE_REQUEST = /時間表|timetable|schedule|上堂時間|課堂時間|幾點有堂|邊日有堂/i
+const timetableText = (app: string) => `呢個係最新時間表 📅 即日有冇位可以喺 ${app || 'Fuse App'} 查；想上邊堂話我知，我幫你安排。`
+
 const DEFAULT_HANDOFF = '收到！我已經通知同事，佢哋會盡快回覆你 🙏'
 /** Timeline entry when the customer asks for a person (TASK-5 spec wording). */
 export const HUMAN_REQUEST_EVENT = '客人要求真人跟進（㩒「同真人講」）'
@@ -189,8 +193,13 @@ async function respond(conversationId: number) {
     reply = { action: 'handoff', reason: '一小時內自動回覆次數已達上限' }
   } else {
     // An exact FAQ answer only fits when it's what the latest message asks; anything else goes to the AI.
-    const faq = findFaq(pending[0].transcript ?? pending[0].body, brandOfConversation(conversationId)?.id)
-    reply = faq
+    const latest = pending[0].transcript ?? pending[0].body
+    const brand = brandOfConversation(conversationId)
+    const faq = findFaq(latest, brand?.id)
+    // The timetable picture goes out as is in 'auto' mode; a 'suggest' draft can't carry an image.
+    reply = mode === 'auto' && brand?.timetable_image && TIMETABLE_REQUEST.test(latest)
+      ? { action: 'reply', text: timetableText(brand.booking_platform), images: [brand.timetable_image] }
+      : faq
       ? { action: 'reply', text: faq.body }
       : guardClarify(conversationId, pending.map((m) => m.transcript ?? m.body).join('\n'), await customerReply(conversationId, aside ? { resume: aside.resume } : undefined))
   }

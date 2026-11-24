@@ -8,7 +8,7 @@ interface Offer { id: number; branch_keys: string; label: string; price_text: st
 interface Pkg { id: number; category: string; sessions: number; price: number; validity: string; backoffice_name: string; active: number }
 export interface BrandFull {
   id: number; key: string; name: string; whatsapp: string
-  booking_url: string; booking_platform: string; booking_steps: string; booking_steps_image: string | null
+  booking_url: string; booking_platform: string; booking_steps: string; booking_steps_image: string | null; timetable_image: string | null
   fps_id: string; fps_name: string; payme_link: string; payment_qr_image: string | null; ref_prefix: string; after_trial_offer: string
   branches: Branch[]; trial_offers: Offer[]; packages: Pkg[]
 }
@@ -88,7 +88,7 @@ function BrandCard({ brand, admin, onSaved }: { brand: BrandFull; admin: boolean
     try { await api(`/brands/${brand.id}`, { method: 'PUT', body: form }); setMsg('已儲存'); onSaved() }
     catch (err) { setMsg(err instanceof Error ? err.message : '未能儲存') }
   }
-  const upload = async (kind: 'qr' | 'steps', file?: File) => {
+  const upload = async (kind: 'qr' | 'steps' | 'timetable', file?: File) => {
     if (!file) return
     setMsg('')
     try { await api(`/brands/${brand.id}/image`, { body: { kind, dataUrl: await readFile(file) } }); onSaved() }
@@ -120,6 +120,8 @@ function BrandCard({ brand, admin, onSaved }: { brand: BrandFull; admin: boolean
             {field('booking_steps', '預約步驟（傳給客人）', undefined, true)}
             <ImageField label="預約步驟圖片（可選）" path={brand.booking_steps_image} onPick={(f) => upload('steps', f)}
               onRemove={() => api(`/brands/${brand.id}/image/steps`, { method: 'DELETE' }).then(onSaved)} />
+            <ImageField label="本月時間表圖（客人問時間表，全自動模式會連圖回覆；每月記得換）" path={brand.timetable_image} onPick={(f) => upload('timetable', f)}
+              onRemove={() => api(`/brands/${brand.id}/image/timetable`, { method: 'DELETE' }).then(onSaved)} />
             {field('after_trial_offer', '試堂後跟進時附上的優惠（知識庫原文；留空則不提）', '例如：完成所有試堂後一星期內購買套票 95 折（FPS／PayMe）')}
           </div>
           <div className="form-stack">

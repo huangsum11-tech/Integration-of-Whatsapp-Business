@@ -11,7 +11,7 @@ import { all, get, run, tx } from './db.js'
 
 export interface Brand {
   id: number; key: string; name: string; whatsapp: string
-  booking_url: string; booking_platform: string; booking_steps: string; booking_steps_image: string | null
+  booking_url: string; booking_platform: string; booking_steps: string; booking_steps_image: string | null; timetable_image: string | null
   fps_id: string; fps_name: string; payme_link: string; payment_qr_image: string | null; ref_prefix: string
   after_trial_offer: string
 }

@@ -82,21 +82,24 @@ studio.put('/brands/:id', requireAdmin, (req, res) => {
   res.json(brandById(id))
 })
 
-/** Upload the payment QR code or the booking-steps picture (data URL). Kept under data/media/uploads. */
+const IMAGE_COLUMN = { qr: 'payment_qr_image', steps: 'booking_steps_image', timetable: 'timetable_image' } as const
+
+/** Upload the payment QR code, booking-steps or timetable picture (data URL). Kept under data/media/uploads. */
 studio.post('/brands/:id/image', requireAdmin, (req, res) => {
   const id = Number(req.params.id)
-  const b = body(z.object({ kind: z.enum(['qr', 'steps']), dataUrl: z.string().regex(/^data:image\/(png|jpe?g|webp);base64,/, '只接受 PNG、JPG 或 WebP 圖片') }), req)
+  const b = body(z.object({ kind: z.enum(['qr', 'steps', 'timetable']), dataUrl: z.string().regex(/^data:image\/(png|jpe?g|webp);base64,/, '只接受 PNG、JPG 或 WebP 圖片') }), req)
   if (!brandById(id)) return res.status(404).json({ error: '找不到品牌' })
   const [, ext, data] = b.dataUrl.match(/^data:image\/(png|jpe?g|webp);base64,(.*)$/)!
   const rel = path.join('uploads', `brand-${id}-${b.kind}-${Date.now()}.${ext === 'jpeg' ? 'jpg' : ext}`)
   fs.mkdirSync(path.join(MEDIA_DIR, 'uploads'), { recursive: true })
   fs.writeFileSync(path.join(MEDIA_DIR, rel), Buffer.from(data, 'base64'))
-  run(`UPDATE brands SET ${b.kind === 'qr' ? 'payment_qr_image' : 'booking_steps_image'} = ? WHERE id = ?`, rel, id)
+  run(`UPDATE brands SET ${IMAGE_COLUMN[b.kind]} = ? WHERE id = ?`, rel, id)
   res.json(brandById(id))
 })
 
 studio.delete('/brands/:id/image/:kind', requireAdmin, (req, res) => {
-  const column = req.params.kind === 'qr' ? 'payment_qr_image' : 'booking_steps_image'
+  const column = IMAGE_COLUMN[req.params.kind as keyof typeof IMAGE_COLUMN]
+  if (!column) return res.status(400).json({ error: '未知圖片類別' })
   run(`UPDATE brands SET ${column} = NULL WHERE id = ?`, Number(req.params.id))
   res.json(brandById(Number(req.params.id)))
 })
