@@ -965,6 +965,8 @@ function getContact(id: number) {
 
 api.get('/contacts', (req, res) => {
   const q = req.query.q ? `%${String(req.query.q)}%` : '%'
+  // Channel filter: phone (WhatsApp) customers, or Instagram / Facebook / Threads ones by their id prefix.
+  const kind = ({ phone: "ct.phone NOT LIKE 'ig:%' AND ct.phone NOT LIKE 'fb:%' AND ct.phone NOT LIKE 'th:%'", ig: "ct.phone LIKE 'ig:%'", fb: "ct.phone LIKE 'fb:%'", th: "ct.phone LIKE 'th:%'" } as Record<string, string>)[String(req.query.kind ?? '')] ?? '1'
   res.json(all(
     `SELECT ${CONTACT_COLUMNS}, ${CONTACT_NAME_SQL} AS display_name, u.name AS owner_name,
        (SELECT COUNT(*) FROM conversations c WHERE c.contact_id = ct.id) AS conversations,
@@ -973,7 +975,7 @@ api.get('/contacts', (req, res) => {
        (SELECT COALESCE(SUM(amount), 0) FROM deals d WHERE d.contact_id = ct.id AND d.stage = 'won') AS won_amount,
        (SELECT GROUP_CONCAT(tag, '、') FROM contact_tags g WHERE g.contact_id = ct.id) AS tags
      FROM contacts ct LEFT JOIN users u ON u.id = ct.owner_id
-     WHERE ct.name LIKE ?1 OR ct.saved_name LIKE ?1 OR ct.wa_name LIKE ?1 OR ct.phone LIKE ?1 OR (?1 = '%')
+     WHERE (ct.name LIKE ?1 OR ct.saved_name LIKE ?1 OR ct.wa_name LIKE ?1 OR ct.phone LIKE ?1 OR (?1 = '%')) AND ${kind}
      ORDER BY last_message_at DESC NULLS LAST LIMIT 500`,
     q,
   ))

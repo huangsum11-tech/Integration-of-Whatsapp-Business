@@ -8,17 +8,18 @@ import { getSocket } from '../socket'
 export default function Contacts() {
   const { users } = useApp()
   const [q, setQ] = useState('')
+  const [kind, setKind] = useState<'' | 'phone' | 'ig' | 'fb'>('')
   const [contacts, setContacts] = useState<Contact[]>([])
   const [editing, setEditing] = useState<number | null>(null)
   const [draftName, setDraftName] = useState('')
   const [messageHits, setMessageHits] = useState<{ id: number; conversation_id: number; body: string; ts: number; contact_name: string; number_label: string }[]>([])
 
   const load = () => {
-    api<Contact[]>(`/contacts${q ? `?q=${encodeURIComponent(q)}` : ''}`).then(setContacts)
+    api<Contact[]>(`/contacts?q=${encodeURIComponent(q)}&kind=${kind}`).then(setContacts)
     if (q.trim()) api(`/search?q=${encodeURIComponent(q.trim())}`).then(setMessageHits)
     else setMessageHits([])
   }
-  useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t) }, [q])
+  useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t) }, [q, kind])
   useEffect(() => {
     const socket = getSocket()
     socket.on('contact', load)
@@ -48,6 +49,14 @@ export default function Contacts() {
           <Icon name="search" size={16} />
           <input className="input" style={{ background: 'var(--surface)', borderColor: 'var(--line)' }} placeholder="搜尋聯絡人或訊息內容" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
+      </div>
+
+      <div className="channel-chips" role="group" aria-label="客人類別" style={{ marginBottom: 14 }}>
+        {([['', '全部'], ['phone', '電話'], ['ig', 'Instagram'], ['fb', 'Facebook']] as const).map(([k, label]) => (
+          <button key={k} className={`channel-chip ${kind === k ? 'active' : ''}`} aria-pressed={kind === k} onClick={() => setKind(k)}>
+            {k && <Icon name={k === 'phone' ? 'phone' : k === 'ig' ? 'instagram' : 'facebook'} size={13} />}{label}
+          </button>
+        ))}
       </div>
 
       {messageHits.length > 0 && (
