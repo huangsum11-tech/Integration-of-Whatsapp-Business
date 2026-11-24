@@ -23,6 +23,8 @@ export type ReplyMode = 'off' | 'suggest' | 'auto'
 const DELAY_MS = Number(process.env.BATON_AI_DELAY_MS ?? 8000)
 /** Safety net against loops with another bot: at most this many AI replies per conversation per hour. */
 const MAX_AUTO_PER_HOUR = 15
+/** A customer message older than this (e.g. Meta re-delivering after Baton was offline) goes to a person, not the AI. */
+const STALE_AFTER_S = 2 * 3600
 
 const timers = new Map<number, NodeJS.Timeout>()
 
@@ -159,8 +161,8 @@ async function respond(conversationId: number) {
 
   // Everything the customer said since the team last replied.
   const load = () => {
-    const recent = all<{ id: number; from_me: number; type: MessageType; body: string; transcript: string | null }>(
-      'SELECT id, from_me, type, body, transcript FROM messages WHERE conversation_id = ? ORDER BY ts DESC, id DESC LIMIT 20', conversationId,
+    const recent = all<{ id: number; from_me: number; type: MessageType; body: string; transcript: string | null; ts: number }>(
+      'SELECT id, from_me, type, body, transcript, ts FROM messages WHERE conversation_id = ? ORDER BY ts DESC, id DESC LIMIT 20', conversationId,
     )
     return recent.slice(0, recent.findIndex((m) => m.from_me) === -1 ? recent.length : recent.findIndex((m) => m.from_me))
   }
@@ -184,7 +186,9 @@ async function respond(conversationId: number) {
   const recentAuto = get<{ c: number }>(
     'SELECT COUNT(*) AS c FROM messages WHERE conversation_id = ? AND ai_auto = 1 AND ts > unixepoch() - 3600', conversationId,
   )!.c
-  if (flowReply) {
+  if (Date.now() / 1000 - pending[0].ts > STALE_AFTER_S) {
+    reply = { action: 'handoff', reason: '訊息延遲送達（超過 2 小時），請同事跟進' }
+  } else if (flowReply) {
     reply = flowReply
   } else if (nonText) {
     // The AI reads text only; photos, voice notes and files need a person.
