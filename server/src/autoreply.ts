@@ -42,7 +42,9 @@ export const HUMAN_REQUEST_EVENT = '客人要求真人跟進（㩒「同真人�
  * contains them ("我唔想同真人講") is an ordinary message for the AI.
  */
 export function isHumanRequest(text: string) {
-  return text.replace(/\s+/g, '').replace(/[!！。.~～?？]+$/u, '') === HUMAN_BUTTON.title
+  const plain = (s: string) => s.replace(/[\s\p{Extended_Pictographic}\uFE0F]+/gu, '').replace(/[!！。.~～?？]+$/u, '')
+  // The button's own words, or the original 「同真人講」 (still accepted when typed).
+  return [plain(HUMAN_BUTTON.title), '同真人講'].includes(plain(text))
 }
 
 /**

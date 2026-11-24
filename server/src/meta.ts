@@ -189,7 +189,7 @@ export async function sendCloudText(numberId: number, conversationId: number, ji
 }
 
 /** The quick-reply button on the AI's WhatsApp replies that hands the chat to a person. */
-export const HUMAN_BUTTON = { id: 'handoff_human', title: '同真人講' } as const
+export const HUMAN_BUTTON = { id: 'handoff_human', title: '💬 搵真人同事' } as const
 /** The id used before 2026-11-13; buttons already in customers' chats still carry it. */
 const LEGACY_HUMAN_BUTTON_IDS = new Set(['baton_human'])
 /** WhatsApp's limit for the body of a message with reply buttons. */

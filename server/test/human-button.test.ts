@@ -52,7 +52,7 @@ function webhook(phone: string, message: Record<string, unknown>) {
     } }] }],
   })
 }
-const tap = (phone: string, id: string, title = '同真人講') =>
+const tap = (phone: string, id: string, title: string = meta.HUMAN_BUTTON.title) =>
   webhook(phone, { id, type: 'interactive', interactive: { type: 'button_reply', button_reply: { id: meta.HUMAN_BUTTON.id, title } } })
 
 // ---------- Sending ----------
@@ -63,7 +63,7 @@ test('payload: one quick-reply button 「同真人講」 with id handoff_human, 
     interactive: {
       type: 'button',
       body: { text: '你好' },
-      action: { buttons: [{ type: 'reply', reply: { id: 'handoff_human', title: '同真人講' } }] },
+      action: { buttons: [{ type: 'reply', reply: { id: 'handoff_human', title: '💬 搵真人同事' } }] },
     },
   })
   // WhatsApp's limits: button title up to 20 characters, id up to 256.
@@ -74,7 +74,7 @@ test('payload: one quick-reply button 「同真人講」 with id handoff_human, 
 test('FAQ answer on a Cloud API number carries the button', async () => {
   const r = await ask(cloud, newPhone(), '使唔使著防滑襪？')
   assert.equal(r.text, '上 Reformer 堂要著防滑襪 😊')
-  assert.deepEqual(JSON.parse(outgoing(r.conversationId).at(-1)!.buttons!), ['同真人講'])
+  assert.deepEqual(JSON.parse(outgoing(r.conversationId).at(-1)!.buttons!), [meta.HUMAN_BUTTON.title])
 })
 
 test('no button: QR-linked WhatsApp number, guided flow step, teammate reply, text over 1024 characters', async () => {
@@ -91,7 +91,7 @@ test('no button: QR-linked WhatsApp number, guided flow step, teammate reply, te
   await channels.sendReply(flow.conversationId, '長'.repeat(1025), { userId: null, aiAuto: true, humanButton: true })
   assert.equal(outgoing(flow.conversationId).at(-1)!.buttons, null)
   await channels.sendReply(flow.conversationId, '短', { userId: null, aiAuto: true, humanButton: true })
-  assert.deepEqual(JSON.parse(outgoing(flow.conversationId).at(-1)!.buttons!), ['同真人講'])
+  assert.deepEqual(JSON.parse(outgoing(flow.conversationId).at(-1)!.buttons!), [meta.HUMAN_BUTTON.title])
 })
 
 // ---------- Receiving ----------
@@ -146,7 +146,7 @@ test('after a teammate replies, asking again hands over again', async () => {
 })
 
 test('typed exactly 「同真人講」 (spaces or a final ！ allowed) hands over like the button', async () => {
-  for (const typed of ['同真人講', ' 同真人講 ', '同真人講！']) {
+  for (const typed of ['同真人講', ' 同真人講 ', '同真人講！', '搵真人同事', '💬 搵真人同事']) {
     const s = say(cloud, newPhone(), typed)
     assert.ok(await until(() => requests(s.conversationId) === 1), typed)
     assert.deepEqual(conversation(s.conversationId), { needs_human: 1, ai_paused: 1 })
