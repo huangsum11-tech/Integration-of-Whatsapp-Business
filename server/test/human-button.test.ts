@@ -63,7 +63,7 @@ test('payload: one quick-reply button 「同真人講」 with id handoff_human, 
     interactive: {
       type: 'button',
       body: { text: '你好' },
-      action: { buttons: [{ type: 'reply', reply: { id: 'handoff_human', title: '💬 搵真人同事' } }] },
+      action: { buttons: [{ type: 'reply', reply: { id: 'handoff_human', title: '👤 轉介同事跟進' } }] },
     },
   })
   // WhatsApp's limits: button title up to 20 characters, id up to 256.
@@ -146,7 +146,7 @@ test('after a teammate replies, asking again hands over again', async () => {
 })
 
 test('typed exactly 「同真人講」 (spaces or a final ！ allowed) hands over like the button', async () => {
-  for (const typed of ['同真人講', ' 同真人講 ', '同真人講！', '搵真人同事', '💬 搵真人同事']) {
+  for (const typed of ['同真人講', ' 同真人講 ', '同真人講！', '轉介同事跟進', '👤 轉介同事跟進']) {
     const s = say(cloud, newPhone(), typed)
     assert.ok(await until(() => requests(s.conversationId) === 1), typed)
     assert.deepEqual(conversation(s.conversationId), { needs_human: 1, ai_paused: 1 })
