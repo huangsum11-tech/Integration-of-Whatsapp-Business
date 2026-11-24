@@ -418,7 +418,8 @@ api.post('/conversations/:id/ai', (req, res) => {
   const id = Number(req.params.id)
   const { paused } = body(z.object({ paused: z.boolean() }), req)
   if (!getConversation(id)) return res.status(404).json({ error: '找不到對話' })
-  run('UPDATE conversations SET ai_paused = ? WHERE id = ?', paused ? 1 : 0, id)
+  // Resuming hands the chat back to the AI, so it leaves the 待人工 queue.
+  run(`UPDATE conversations SET ai_paused = ?${paused ? '' : ', needs_human = 0'} WHERE id = ?`, paused ? 1 : 0, id)
   addEvent(id, req.user.id, paused ? 'ai_paused' : 'ai_resumed')
   broadcast('conversation', getConversation(id))
   res.json({ ok: true })
