@@ -198,3 +198,26 @@ test('the echo of a message Baton sent (different id on the Page route) is not s
   const rows = db.all<{ body: string }>('SELECT body FROM messages WHERE conversation_id = ? AND from_me = 1 ORDER BY id', conv)
   assert.deepEqual(rows.map((r) => r.body), ['多謝你查詢', '我喺手機覆你'], 'own echo skipped; a real phone reply is kept')
 })
+
+test('AI replies on Instagram carry the 👤 轉介同事跟進 quick reply; tapping it hands the chat to a person', async () => {
+  const channels = await import('../src/channels.js')
+  mock([[/\/messages$/, 200, { message_id: 'm-qr-1' }]])
+  db.run("UPDATE numbers SET reply_mode = 'auto' WHERE id = ?", fbNumber)
+  try {
+    const conv = conversationWithCustomer(fbNumber, '999001')
+    await channels.sendReply(conv, '有咩可以幫到你？', { userId: null, aiAuto: true, humanButton: true })
+    assert.deepEqual((calls.at(-1)!.body as { message: unknown }).message, {
+      text: '有咩可以幫到你？', quick_replies: [{ content_type: 'text', title: meta.HUMAN_BUTTON.title, payload: meta.HUMAN_BUTTON.id }],
+    })
+    // The customer taps the chip: Instagram sends its title as a message.
+    meta.handleWebhook({ object: 'instagram', entry: [{ id: IG_ID, time: Date.now(), messaging: [{
+      sender: { id: '999001' }, recipient: { id: IG_ID }, timestamp: Date.now(),
+      message: { mid: 'mid-tap-1', text: meta.HUMAN_BUTTON.title, quick_reply: { payload: meta.HUMAN_BUTTON.id } },
+    }] }] })
+    const end = Date.now() + 2000
+    while (!db.get<{ needs_human: number }>('SELECT needs_human FROM conversations WHERE id = ?', conv)!.needs_human && Date.now() < end) await new Promise((r) => setTimeout(r, 25))
+    assert.deepEqual({ ...db.get('SELECT needs_human, ai_paused FROM conversations WHERE id = ?', conv) }, { needs_human: 1, ai_paused: 1 })
+  } finally {
+    db.run("UPDATE numbers SET reply_mode = 'off' WHERE id = ?", fbNumber)
+  }
+})

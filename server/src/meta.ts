@@ -279,12 +279,16 @@ export async function sendCloudTemplate(numberId: number, phone: string, templat
   return id
 }
 
-export async function sendInstagramText(numberId: number, conversationId: number, jid: string, text: string) {
+/** quickReplies: tappable chips under the message (Instagram app only; the tapped title comes back as text). */
+export async function sendInstagramText(numberId: number, conversationId: number, jid: string, text: string, quickReplies?: readonly { id: string; title: string }[] | null) {
   assertServiceWindow(conversationId)
   const config = numberConfig<InstagramConfig>(numberId)
   const data = await graph<{ message_id?: string }>(`${igBase(config)}/${encodeURIComponent(igSender(config))}/messages`, config.accessToken, {
     method: 'POST',
-    body: { recipient: { id: jid.split('@')[0] }, message: { text } },
+    body: {
+      recipient: { id: jid.split('@')[0] },
+      message: { text, ...(quickReplies?.length ? { quick_replies: quickReplies.map((q) => ({ content_type: 'text', title: q.title, payload: q.id })) } : {}) },
+    },
   })
   if (!data.message_id) throw new Error('發送失敗')
   return data.message_id

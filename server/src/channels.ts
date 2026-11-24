@@ -46,7 +46,8 @@ export async function sendReply(conversationId: number, text: string, opts: Send
   }
   const contact = contactFor(conversation.jid, conversation.phone)
   // A message too long for a button message goes out as plain text instead.
-  const buttons = opts.humanButton && number.channel === 'wa_cloud' && text.length <= BUTTON_BODY_MAX ? [HUMAN_BUTTON] : null
+  // WhatsApp shows a reply button; Instagram shows a quick-reply chip (its text limit is 1000).
+  const buttons = opts.humanButton && ((number.channel === 'wa_cloud' && text.length <= BUTTON_BODY_MAX) || (number.channel === 'instagram' && text.length <= 1000)) ? [HUMAN_BUTTON] : null
   const titles = buttons?.map((b) => b.title) ?? null
 
   if (number.demo) {
@@ -56,6 +57,8 @@ export async function sendReply(conversationId: number, text: string, opts: Send
   } else {
     const waId = number.channel === 'threads'
       ? await sendThreadsReply(conversation.number_id, conversationId, text)
+      : number.channel === 'instagram'
+      ? await sendInstagramText(conversation.number_id, conversationId, conversation.jid, text, buttons)
       : buttons
       ? await sendCloudButtons(conversation.number_id, conversationId, conversation.jid, text, buttons)
       : await ({ wa_cloud: sendCloudText, instagram: sendInstagramText, messenger: sendMessengerText } as const)[number.channel](

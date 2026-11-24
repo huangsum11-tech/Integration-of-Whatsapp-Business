@@ -102,10 +102,10 @@ export function guardClarify(conversationId: number, customerText: string, reply
   return reply
 }
 
-/** The 「同真人講」 button is only on WhatsApp Cloud API numbers, so only they take the request. */
+/** The human button is on WhatsApp Cloud API replies and, as a quick reply, on Instagram ones. */
 function takesHumanRequest(numberId: number, messageId: number) {
   const n = get<{ channel: string }>('SELECT channel FROM numbers WHERE id = ?', numberId)
-  if (n?.channel !== 'wa_cloud') return false
+  if (n?.channel !== 'wa_cloud' && n?.channel !== 'instagram') return false
   const m = get<{ type: string; body: string }>('SELECT type, body FROM messages WHERE id = ?', messageId)
   return m?.type === 'text' && isHumanRequest(m.body)
 }
