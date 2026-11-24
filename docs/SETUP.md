@@ -138,6 +138,7 @@ Meta 只會把訊息傳到**公開的 HTTPS 網址**，所以伺服器要 24 小
 2. 用途選「**其他**」，類型選「**商業**（Business）」，連結你的商業管理帳戶。
 3. App 主控板 →「應用程式設定」→「基本資料」：
    - 複製「**應用程式密鑰**」→ 填入 `.env` 的 `META_APP_SECRET`，重新啟動 Baton。
+   - 如果第二個商家組合（例如 Fuse Pilates）用自己開嘅 Meta App 接入同一條 webhook，將嗰個 App 嘅應用程式密鑰填入 `META_APP_SECRET_2`，verify token 用返同一個值。
    - 填好私隱政策網址（App 上線必須）。
 4. 之後每個渠道都在這個 App 加入產品（WhatsApp、Instagram、Messenger、Threads）。
 

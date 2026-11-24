@@ -488,7 +488,8 @@ export const metaEvents = new EventEmitter()
 
 /** Meta signs each delivery with the app secret; reject anything that doesn't match. */
 export function validSignature(rawBody: Buffer | undefined, header: string | undefined) {
-  const secrets = [process.env.META_APP_SECRET, process.env.INSTAGRAM_APP_SECRET].filter((s): s is string => Boolean(s))
+  // META_APP_SECRET_2: a second Meta app (e.g. one owned by another business portfolio) posting to the same webhook.
+  const secrets = [process.env.META_APP_SECRET, process.env.META_APP_SECRET_2, process.env.INSTAGRAM_APP_SECRET].filter((s): s is string => Boolean(s))
   if (secrets.length === 0) return true
   if (!rawBody || !header?.startsWith('sha256=')) return false
   const given = Buffer.from(header.slice(7), 'hex')
