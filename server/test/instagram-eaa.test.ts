@@ -183,3 +183,18 @@ test('webhook in: object=instagram with entry.id = igUserId lands on the Faceboo
   // The customer's name is looked up on the same host as the account.
   assert.ok(calls.every((c) => new URL(c.url).host === 'graph.facebook.com'))
 })
+
+test('the echo of a message Baton sent (different id on the Page route) is not stored twice', async () => {
+  mock([[/\/messages$/, 200, { message_id: 'aWdfsend-id-1' }]])
+  const conv = conversationWithCustomer(fbNumber, '888001')
+  const channels = await import('../src/channels.js')
+  await channels.sendReply(conv, '多謝你查詢', { userId: t.staff })
+  meta.handleWebhook({ object: 'instagram', entry: [{ id: IG_ID, time: Date.now(), messaging: [{
+    sender: { id: IG_ID }, recipient: { id: '888001' }, timestamp: Date.now(), message: { mid: 'bmV3echo-id-1', text: '多謝你查詢', is_echo: true },
+  }] }] })
+  meta.handleWebhook({ object: 'instagram', entry: [{ id: IG_ID, time: Date.now(), messaging: [{
+    sender: { id: IG_ID }, recipient: { id: '888001' }, timestamp: Date.now(), message: { mid: 'bmV3phone-id-2', text: '我喺手機覆你', is_echo: true },
+  }] }] })
+  const rows = db.all<{ body: string }>('SELECT body FROM messages WHERE conversation_id = ? AND from_me = 1 ORDER BY id', conv)
+  assert.deepEqual(rows.map((r) => r.body), ['多謝你查詢', '我喺手機覆你'], 'own echo skipped; a real phone reply is kept')
+})

@@ -631,6 +631,14 @@ function storeMessagingEvents(channel: 'instagram' | 'messenger', numberId: numb
     const attachment = m.attachments?.[0]
     const type: MessageType = m.text ? 'text' : attachment ? IG_ATTACHMENT[attachment.type] ?? 'other' : 'other'
     const domain = channel === 'instagram' ? 'instagram' : 'messenger'
+    // The echo of a message Baton itself sent can carry a different id from the send reply (Page
+    // route): skip it, or it shows twice as "sent from the phone" and pauses the AI.
+    if (fromMe && get(
+      `SELECT 1 FROM messages m JOIN conversations c ON c.id = m.conversation_id
+       WHERE c.number_id = ? AND c.jid = ? AND m.from_me = 1 AND (m.sender_id IS NOT NULL OR m.ai_auto = 1)
+         AND m.type = ? AND m.body = ? AND m.wa_id != ? AND abs(m.ts - ?) <= 120`,
+      numberId, `${customer}@${domain}`, type, m.text ?? '', m.mid, Math.floor(event.timestamp / 1000),
+    )) continue
     const stored = storeMessage({
       numberId, jid: `${customer}@${domain}`, contact: channel === 'instagram' ? { ig: customer } : { fb: customer }, waId: m.mid, fromMe,
       type, body: m.text ?? '', ts: Math.floor(event.timestamp / 1000), live: true,
