@@ -219,7 +219,7 @@ function trialStep(flow: Flow, text: string): FlowReply {
     return {
       action: 'reply',
       text: `多謝${name ? ` ${name}` : ''}！請用以下連結${brand.booking_platform ? `喺 ${brand.booking_platform} ` : ''}預約 ${branch.name} 嘅 ${offer.label}：\n${brand.booking_url}\n${steps ? `\n預約步驟：\n${steps}\n` : ''}\n預約好之後，話我知日期同時間，我會喺上堂前提你 😊\n如果唔識操作，回覆「幫我訂」，同事會幫你安排。`,
-      images: brand.booking_steps_image ? [brand.booking_steps_image] : undefined,
+      images: [brand.booking_steps_image, brand.booking_steps_image_2].filter((i): i is string => Boolean(i)),
     }
   }
 

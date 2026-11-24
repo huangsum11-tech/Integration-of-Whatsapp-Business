@@ -436,6 +436,8 @@ CREATE TABLE IF NOT EXISTS payroll_items (
 // Which brand a WhatsApp number / account belongs to: decides prices, links and payment details.
 if (!columns('numbers').includes('brand_id')) db.exec('ALTER TABLE numbers ADD COLUMN brand_id INTEGER REFERENCES brands(id)')
 // This month's timetable picture per brand, sent when a customer asks for the timetable.
+// A second booking-steps picture (e.g. download & sign-up steps, then booking steps).
+if (!columns('brands').includes('booking_steps_image_2')) db.exec('ALTER TABLE brands ADD COLUMN booking_steps_image_2 TEXT')
 if (!columns('brands').includes('timetable_image')) db.exec('ALTER TABLE brands ADD COLUMN timetable_image TEXT')
 // Knowledge entries for one brand only (NULL = every brand).
 if (!columns('knowledge').includes('brand_id')) db.exec('ALTER TABLE knowledge ADD COLUMN brand_id INTEGER REFERENCES brands(id)')

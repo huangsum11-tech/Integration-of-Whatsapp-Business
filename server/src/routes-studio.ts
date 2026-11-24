@@ -82,12 +82,12 @@ studio.put('/brands/:id', requireAdmin, (req, res) => {
   res.json(brandById(id))
 })
 
-const IMAGE_COLUMN = { qr: 'payment_qr_image', steps: 'booking_steps_image', timetable: 'timetable_image' } as const
+const IMAGE_COLUMN = { qr: 'payment_qr_image', steps: 'booking_steps_image', steps2: 'booking_steps_image_2', timetable: 'timetable_image' } as const
 
 /** Upload the payment QR code, booking-steps or timetable picture (data URL). Kept under data/media/uploads. */
 studio.post('/brands/:id/image', requireAdmin, (req, res) => {
   const id = Number(req.params.id)
-  const b = body(z.object({ kind: z.enum(['qr', 'steps', 'timetable']), dataUrl: z.string().regex(/^data:image\/(png|jpe?g|webp);base64,/, '只接受 PNG、JPG 或 WebP 圖片') }), req)
+  const b = body(z.object({ kind: z.enum(['qr', 'steps', 'steps2', 'timetable']), dataUrl: z.string().regex(/^data:image\/(png|jpe?g|webp);base64,/, '只接受 PNG、JPG 或 WebP 圖片') }), req)
   if (!brandById(id)) return res.status(404).json({ error: '找不到品牌' })
   const [, ext, data] = b.dataUrl.match(/^data:image\/(png|jpe?g|webp);base64,(.*)$/)!
   const rel = path.join('uploads', `brand-${id}-${b.kind}-${Date.now()}.${ext === 'jpeg' ? 'jpg' : ext}`)

@@ -77,15 +77,21 @@ async function claude(model: string, req: LlmRequest): Promise<string> {
   return response.content.filter((b) => b.type === 'text').map((b) => b.text).join('')
 }
 
+/** Backup models, in order, when the chosen Gemini model is busy. */
+const GEMINI_BACKUPS = ['gemini-3.6-flash', 'gemini-flash-lite-latest']
+
 /**
- * Gemini is often briefly overloaded ("high demand", 429/5xx) or returns no text. Retry twice,
- * then try the default model once, before giving up.
+ * Gemini is often briefly overloaded ("high demand", 429/5xx) or returns no text. Each model
+ * gets 3 tries (chosen model, then the backups), then the chosen model once more.
  */
 async function gemini(model: string, req: LlmRequest): Promise<string> {
-  const plan = [model, model, model, ...(model === PROVIDERS.gemini.defaultModel ? [] : [PROVIDERS.gemini.defaultModel])]
+  const models = [...new Set([model, ...GEMINI_BACKUPS])]
+  const plan = [...models.flatMap((m) => [m, m, m]), model]
+  const scale = Number(process.env.BATON_AI_RETRY_SCALE ?? 1)
   let lastError: unknown
   for (const [i, m] of plan.entries()) {
-    if (i > 0) await new Promise((r) => setTimeout(r, [0, 2000, 5000, 1000][i]))
+    // 2 s and 5 s between tries of one model, 1 s before moving to the next model.
+    if (i > 0) await new Promise((r) => setTimeout(r, (m !== plan[i - 1] ? 1000 : i % 3 === 1 ? 2000 : 5000) * scale))
     try {
       const text = await geminiOnce(m, req)
       if (text.trim()) return text
