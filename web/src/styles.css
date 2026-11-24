@@ -615,6 +615,15 @@ textarea.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; fon
   .shell:not(.rail-collapsed) .me-pop { left: 0; bottom: calc(100% + 8px); }
   .rail-toggle { display: flex; }
   .shell.rail-collapsed .rail-toggle .rail-label { display: none; }
+  /* Folded: same light colours as the open sidebar, icons with small labels. */
+  .shell.rail-collapsed .rail { background: var(--surface); border-right: 1px solid var(--line); }
+  .shell.rail-collapsed .rail-btn { color: var(--text); }
+  .shell.rail-collapsed .rail-btn svg { color: var(--muted); }
+  .shell.rail-collapsed .rail-btn:hover { background: var(--paper); color: var(--text); }
+  .shell.rail-collapsed .rail-btn.active { background: var(--pine-50); color: var(--pine-600); font-weight: 600; }
+  .shell.rail-collapsed .rail-btn.active svg { color: var(--pine); }
+  .shell.rail-collapsed .rail-btn.active::before { background: var(--pine); }
+  .shell.rail-collapsed .me-btn .avatar { box-shadow: none; }
 }
 
 /* ---------- Channels page (2026-11 redesign) ---------- */
